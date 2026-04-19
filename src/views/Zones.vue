@@ -15,6 +15,14 @@
             <span v-if="dnsHealth.latency_ms != null" class="lat"> {{ dnsHealth.latency_ms }} ms</span>
           </el-tag>
           <el-tag v-else type="danger" size="small">{{ dnsHealth.message }}</el-tag>
+          <span
+            v-if="dnsHealth?.probe_host != null && dnsHealth.probe_host !== ''"
+            class="muted probe-hint"
+            :title="dnsProbeTitle(dnsHealth)"
+          >
+            → {{ dnsHealth.probe_host }}:{{ dnsHealth.probe_port ?? 53 }}
+            <span class="probe-src">({{ dnsHealth.probe_source }})</span>
+          </span>
           <el-button link size="small" :loading="dnsHealthLoading" @click="fetchDnsHealth">Обновить</el-button>
         </div>
       </div>
@@ -39,37 +47,10 @@
         </el-col>
       </el-row>
 
-      <el-card v-if="selectedZone" class="dnssec-card" shadow="never">
-        <template #header>DNSSEC (Knot)</template>
-        <el-space direction="vertical" alignment="stretch" style="width: 100%" :size="10">
-          <el-alert
-            type="info"
-            show-icon
-            :closable="false"
-            title="После включения подписи опубликуйте DS-записи у регистратора родительской зоны."
-          />
-          <div class="dnssec-row">
-            <span class="dnssec-label">Подписывать зону</span>
-            <el-switch v-model="dnssecLocal" />
-            <el-button
-              type="primary"
-              :loading="dnssecSaving"
-              :disabled="!dnssecDirty"
-              @click="applyDnssec"
-            >
-              Применить в knot.conf
-            </el-button>
-          </div>
-          <div>
-            <el-button :loading="dsLoading" @click="openDsDialog">Показать DS (SHA-256) для регистратора</el-button>
-          </div>
-        </el-space>
-      </el-card>
-
       <div class="zone-editor">
         <div class="tab-toolbar">
           <el-alert
-            v-if="formParseError && activeTab !== 'text'"
+            v-if="formParseError && activeTab !== 'text' && activeTab !== 'dnssec'"
             type="warning"
             :closable="false"
             :title="formParseError"
@@ -80,7 +61,7 @@
             <el-button @click="validateText" :loading="validateLoading">Проверить синтаксис</el-button>
             <el-button type="success" @click="saveZone" :loading="saving">Сохранить и перезагрузить Knot</el-button>
           </div>
-          <div v-else class="form-actions">
+          <div v-else-if="activeTab !== 'dnssec'" class="form-actions">
             <el-button @click="syncFormFromText" :loading="formLoading">Загрузить поля из текста</el-button>
             <el-button @click="applyFormToText" :loading="renderLoading">Перенести в текст (без сохранения)</el-button>
             <el-button type="success" @click="saveFromForm" :loading="formSaving">Сохранить из формы</el-button>
@@ -181,6 +162,36 @@
           </el-card>
           </el-tab-pane>
 
+          <el-tab-pane label="DNSSEC" name="dnssec">
+            <el-card v-if="selectedZone" class="dnssec-card" shadow="never">
+              <template #header>DNSSEC (Knot)</template>
+              <el-space direction="vertical" alignment="stretch" style="width: 100%" :size="10">
+                <el-alert
+                  type="info"
+                  show-icon
+                  :closable="false"
+                  title="После включения подписи опубликуйте DS-записи у регистратора родительской зоны."
+                />
+                <div class="dnssec-row">
+                  <span class="dnssec-label">Подписывать зону</span>
+                  <el-switch v-model="dnssecLocal" />
+                  <el-button
+                    type="primary"
+                    :loading="dnssecSaving"
+                    :disabled="!dnssecDirty"
+                    @click="applyDnssec"
+                  >
+                    Применить в knot.conf
+                  </el-button>
+                </div>
+                <div>
+                  <el-button :loading="dsLoading" @click="openDsDialog">Показать DS (SHA-256) для регистратора</el-button>
+                </div>
+              </el-space>
+            </el-card>
+            <el-alert v-else type="info" :closable="false" show-icon title="Выберите зону в списке выше." />
+          </el-tab-pane>
+
           <el-tab-pane label="Текст зоны" name="text">
           <el-space direction="vertical" alignment="stretch" style="width: 100%" :size="8">
             <el-alert v-if="validateMessage" :type="validateOk ? 'success' : 'error'" :closable="false" show-icon>
@@ -258,7 +269,7 @@ const newZoneName = ref("");
 const newZoneContent = ref("");
 const creating = ref(false);
 
-const activeTab = ref<"records" | "soa" | "ns" | "text">("records");
+const activeTab = ref<"records" | "soa" | "ns" | "dnssec" | "text">("records");
 const formModel = reactive<ZoneFormModel>(emptyZoneForm());
 const formLoading = ref(false);
 const formSaving = ref(false);
@@ -442,6 +453,19 @@ function assignForm(data: ZoneFormModel) {
       value: r.value,
     })),
   );
+}
+
+const DNS_PROBE_SOURCE_HINT: Record<string, string> = {
+  KNOT_DNS_PROBE_HOST: "переменная KNOT_DNS_PROBE_HOST",
+  "knot.conf.listen": "server.listen в knot.conf (ConfigMap)",
+  knot_pod_ip: "IP pod Knot",
+  KNOT_DNS_HOST: "имя KNOT_DNS_HOST",
+};
+
+function dnsProbeTitle(h: DnsHealthResponse): string {
+  const src = h.probe_source ?? "";
+  const from = DNS_PROBE_SOURCE_HINT[src] ?? src;
+  return `UDP SOA на ${h.probe_host}:${h.probe_port ?? 53}. Откуда адрес: ${from}.`;
 }
 
 async function fetchDnsHealth() {
@@ -653,6 +677,16 @@ onUnmounted(() => {
   gap: 8px;
   flex-wrap: wrap;
 }
+.probe-hint {
+  font-size: 12px;
+  max-width: min(420px, 40vw);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.probe-src {
+  opacity: 0.82;
+}
 .muted {
   color: var(--el-text-color-secondary);
   font-size: 13px;
@@ -685,7 +719,7 @@ onUnmounted(() => {
   width: 110px;
 }
 .dnssec-card {
-  margin-bottom: 16px;
+  margin-bottom: 0;
 }
 .dnssec-row {
   display: flex;

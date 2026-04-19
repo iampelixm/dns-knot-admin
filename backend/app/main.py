@@ -18,11 +18,12 @@ from fastapi.staticfiles import StaticFiles
 from kubernetes import client, config
 from pydantic import BaseModel, Field
 
+from app.axfr_secret import axfr_diag_public_dict, generate_tsig_yaml_fragment, read_axfr_secret
 from app.dns_probe import knot_probe
 from app.dnssec_ds import fetch_ds_records_for_zone
 from app.knot_conf import list_zone_dnssec_flags, set_zone_dnssec_signing, zone_declared_in_knot_conf
 from app.knot_editor_model import KnotEditorModel, apply_editor_model, extract_editor_model
-from app.knot_validate import run_knotc_conf_check
+from app.knot_validate import knot_conf_needs_axfr, run_knotc_conf_check
 from app.knot_yaml import load_schema, parse_knot_conf, serialize_knot_conf
 from app.zone_editor import form_to_zone_text, validate_zonefile, zone_text_to_form
 
@@ -48,7 +49,7 @@ STATIC_DIR = Path(os.environ.get("STATIC_DIR", "")).resolve() if os.environ.get(
 
 bearer_scheme = HTTPBearer(auto_error=False)
 
-app = FastAPI(title="dnsadmin", version="2.1.0", docs_url=None, redoc_url=None)
+app = FastAPI(title="dnsadmin", version="0.3.1", docs_url=None, redoc_url=None)
 
 
 def get_clients():
@@ -66,17 +67,78 @@ def _zone_files_from_cm(data: Dict[str, str]) -> Dict[str, str]:
 
 
 def _read_axfr_secret(core: client.CoreV1Api) -> str | None:
-    try:
-        sec = core.read_namespaced_secret(KNOT_AXFR_SECRET_NAME, NAMESPACE)
-    except Exception:  # noqa: BLE001 — Secret может отсутствовать или RBAC
-        return None
-    raw = (sec.data or {}).get(KNOT_AXFR_SECRET_KEY)
-    if not raw:
-        return None
-    try:
-        return base64.b64decode(raw).decode("utf-8")
-    except Exception:  # noqa: BLE001
-        return None
+    st = read_axfr_secret(
+        core,
+        namespace=NAMESPACE,
+        secret_name=KNOT_AXFR_SECRET_NAME,
+        secret_key=KNOT_AXFR_SECRET_KEY,
+    )
+    return st.content
+
+
+def _axfr_validate_sidecar(
+    core: client.CoreV1Api,
+    knot_conf: str,
+    *,
+    axfr_override: str | None,
+) -> tuple[str | None, Dict[str, Any]]:
+    """Какой YAML AXFR подставить в knotc и сводка для JSON."""
+    needs = knot_conf_needs_axfr(knot_conf)
+    cluster_st = (
+        read_axfr_secret(
+            core,
+            namespace=NAMESPACE,
+            secret_name=KNOT_AXFR_SECRET_NAME,
+            secret_key=KNOT_AXFR_SECRET_KEY,
+        )
+        if needs
+        else None
+    )
+    cluster_block = (
+        axfr_diag_public_dict(
+            cluster_st,
+            namespace=NAMESPACE,
+            secret_name=KNOT_AXFR_SECRET_NAME,
+            secret_key=KNOT_AXFR_SECRET_KEY,
+        )
+        if cluster_st is not None
+        else None
+    )
+
+    hints: list[str] = []
+    if not needs:
+        return None, {
+            "config_includes_knot_path": False,
+            "source": "not_required",
+            "cluster": None,
+            "hints": [],
+        }
+
+    if axfr_override is not None:
+        if axfr_override.strip():
+            src = "override"
+            axfr = axfr_override
+            hints.append("Для проверки используется axfr_override из запроса (не содержимое Secret из кластера).")
+            if cluster_st is not None and cluster_st.code != "ok":
+                hints.extend(f"[кластер] {h}" for h in cluster_st.hints)
+        else:
+            src = "override_empty"
+            axfr = None
+            hints.append("В запросе передан пустой axfr_override — как будто фрагмента нет.")
+            if cluster_st is not None:
+                hints.extend(cluster_st.hints)
+    else:
+        src = "secret"
+        axfr = cluster_st.content if cluster_st is not None else None
+        if cluster_st is not None and cluster_st.code != "ok":
+            hints.extend(cluster_st.hints)
+
+    return axfr, {
+        "config_includes_knot_path": True,
+        "source": src,
+        "cluster": cluster_block,
+        "hints": hints,
+    }
 
 
 def _validate_knot_conf_bundle(
@@ -93,18 +155,17 @@ def _validate_knot_conf_bundle(
             "yaml_ok": False,
             "yaml_error": str(e),
             "knotc": None,
+            "axfr": None,
         }
     core, _ = get_clients()
-    if axfr_override is not None:
-        axfr = axfr_override
-    else:
-        axfr = _read_axfr_secret(core)
+    axfr, axfr_info = _axfr_validate_sidecar(core, knot_conf, axfr_override=axfr_override)
     res = run_knotc_conf_check(knot_conf, _zone_files_from_cm(cm_data), axfr_yaml=axfr)
     return {
         "ok": res.ok,
         "yaml_ok": True,
         "yaml_error": None,
         "knotc": {"ran": res.ran, "ok": res.ok, "message": res.message},
+        "axfr": axfr_info,
     }
 
 
@@ -187,6 +248,14 @@ class AxfrConfBody(BaseModel):
     content: str
 
 
+class TsigGenerateBody(BaseModel):
+    """Тело POST /api/knot-conf/axfr/generate-tsig — генерация фрагмента key:/acl: через `keymgr -t`."""
+
+    key_id: str | None = Field(default=None, description="Имя TSIG; если пусто — axfr-<random>")
+    with_acl: bool = Field(default=True, description="Добавить пример acl с action: transfer")
+    acl_id: str = Field(default="axfr-allowed", description="Идентификатор ACL в сгенерированном фрагменте")
+
+
 LABEL_RE = re.compile(r"^(?=.{1,63}$)(?!-)[a-zA-Z0-9-]+(?<!-)$")
 
 
@@ -267,8 +336,7 @@ def health() -> Dict[str, str]:
 
 def _knot_running_pod_ip() -> str | None:
     """
-    IP pod Knot (при hostNetwork ≈ адрес listen в knot.conf).
-    ClusterIP сервиса knot при bind только на IP ноды не подходит.
+    IP pod Knot (fallback для DNS-проб, если нет KNOT_DNS_PROBE_HOST и нет явного listen в knot.conf).
     """
     try:
         core, _ = get_clients()
@@ -286,24 +354,53 @@ def _knot_running_pod_ip() -> str | None:
     return None
 
 
-def _knot_dns_reachable_host() -> str:
+def _knot_dns_probe_resolution() -> tuple[str, str]:
     """
-    Куда слать DNS-запросы (SOA/DS): явный KNOT_DNS_PROBE_HOST, иначе IP pod Knot, иначе KNOT_DNS_HOST.
+    (хост, источник) для SOA/DS-проб.
+
+    Приоритет: KNOT_DNS_PROBE_HOST → явный адрес из knot.conf server.listen (не wildcard)
+    → IP Running pod Knot → KNOT_DNS_HOST.
     """
     h = os.environ.get("KNOT_DNS_PROBE_HOST", "").strip()
     if h:
-        return h
+        return h, "KNOT_DNS_PROBE_HOST"
+    try:
+        from app.knot_listen_probe import listen_host_for_dns_probe
+
+        core, _ = get_clients()
+        data = _read_knot_conf_map(core)
+        raw = data.get("knot.conf") or ""
+        lh = listen_host_for_dns_probe(raw)
+        if lh:
+            return lh, "knot.conf.listen"
+    except Exception as e:  # noqa: BLE001
+        logger.debug("probe host from knot.conf listen: %s", e)
     ip = _knot_running_pod_ip()
     if ip:
-        return ip
-    return os.environ.get("KNOT_DNS_HOST", "knot")
+        return ip, "knot_pod_ip"
+    return os.environ.get("KNOT_DNS_HOST", "knot"), "KNOT_DNS_HOST"
+
+
+def _knot_dns_reachable_host() -> str:
+    """Куда слать DNS-запросы (SOA/DS)."""
+    host, _ = _knot_dns_probe_resolution()
+    return host
 
 
 @app.get("/api/dns-health")
 def dns_health(_: Dict[str, Any] = Depends(get_current_user)) -> Dict[str, Any]:
-    """SOA (UDP). Цель: KNOT_DNS_PROBE_HOST → IP pod knot → KNOT_DNS_HOST."""
-    ok, msg, ms = knot_probe(_knot_dns_reachable_host())
-    return {"ok": ok, "message": msg, "latency_ms": round(ms, 2) if ms is not None else None}
+    """SOA (UDP). Цель см. _knot_dns_probe_resolution."""
+    host, source = _knot_dns_probe_resolution()
+    ok, msg, ms = knot_probe(host)
+    port = int(os.environ.get("KNOT_DNS_PORT", "53"))
+    return {
+        "ok": ok,
+        "message": msg,
+        "latency_ms": round(ms, 2) if ms is not None else None,
+        "probe_host": host,
+        "probe_source": source,
+        "probe_port": port,
+    }
 
 
 @app.get("/api/knot-conf")
@@ -375,16 +472,64 @@ def put_knot_conf_model(
     return _apply_knot_conf_and_restart(text)
 
 
+@app.get("/api/knot-conf/axfr-status")
+def get_axfr_status(_: Dict[str, Any] = Depends(get_current_user)) -> Dict[str, Any]:
+    """Диагностика Secret AXFR без выдачи содержимого (удобно для подсказок в UI)."""
+    core, _ = get_clients()
+    st = read_axfr_secret(
+        core,
+        namespace=NAMESPACE,
+        secret_name=KNOT_AXFR_SECRET_NAME,
+        secret_key=KNOT_AXFR_SECRET_KEY,
+    )
+    return axfr_diag_public_dict(
+        st,
+        namespace=NAMESPACE,
+        secret_name=KNOT_AXFR_SECRET_NAME,
+        secret_key=KNOT_AXFR_SECRET_KEY,
+    )
+
+
 @app.get("/api/knot-conf/axfr")
 def get_axfr_fragment(_: Dict[str, Any] = Depends(get_current_user)) -> Dict[str, str]:
     core, _ = get_clients()
-    content = _read_axfr_secret(core)
-    if content is None:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Secret {KNOT_AXFR_SECRET_NAME!r} недоступен или нет ключа {KNOT_AXFR_SECRET_KEY!r}",
+    st = read_axfr_secret(
+        core,
+        namespace=NAMESPACE,
+        secret_name=KNOT_AXFR_SECRET_NAME,
+        secret_key=KNOT_AXFR_SECRET_KEY,
+    )
+    if st.content is None:
+        detail = axfr_diag_public_dict(
+            st,
+            namespace=NAMESPACE,
+            secret_name=KNOT_AXFR_SECRET_NAME,
+            secret_key=KNOT_AXFR_SECRET_KEY,
         )
-    return {"content": content}
+        raise HTTPException(status_code=404, detail=detail)
+    return {"content": st.content}
+
+
+@app.post("/api/knot-conf/axfr/generate-tsig")
+def post_axfr_generate_tsig(
+    body: TsigGenerateBody,
+    _: Dict[str, Any] = Depends(get_current_user),
+) -> Dict[str, Any]:
+    """Сгенерировать YAML-фрагмент TSIG (keymgr из образа Knot) + пример acl."""
+    acl = (body.acl_id or "axfr-allowed").strip()
+    if not acl or not LABEL_RE.match(acl):
+        raise HTTPException(status_code=400, detail="Некорректный acl_id")
+    try:
+        yaml_text, kid = generate_tsig_yaml_fragment(
+            body.key_id,
+            with_acl=body.with_acl,
+            acl_id=acl,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except RuntimeError as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
+    return {"yaml": yaml_text, "key_id": kid}
 
 
 @app.put("/api/knot-conf/axfr")
@@ -393,6 +538,39 @@ def put_axfr_fragment(
     _: Dict[str, Any] = Depends(get_current_user),
 ) -> Dict[str, Any]:
     core, apps = get_clients()
+    pre = read_axfr_secret(
+        core,
+        namespace=NAMESPACE,
+        secret_name=KNOT_AXFR_SECRET_NAME,
+        secret_key=KNOT_AXFR_SECRET_KEY,
+    )
+    if pre.code == "not_found":
+        raise HTTPException(
+            status_code=404,
+            detail={
+                **axfr_diag_public_dict(
+                    pre,
+                    namespace=NAMESPACE,
+                    secret_name=KNOT_AXFR_SECRET_NAME,
+                    secret_key=KNOT_AXFR_SECRET_KEY,
+                ),
+                "help": "Secret ещё не создан — kubectl apply k8s/20-knot-axfr-secret.example.yaml "
+                "или create secret, затем повторите сохранение.",
+            },
+        )
+    if pre.code == "forbidden":
+        raise HTTPException(
+            status_code=403,
+            detail={
+                **axfr_diag_public_dict(
+                    pre,
+                    namespace=NAMESPACE,
+                    secret_name=KNOT_AXFR_SECRET_NAME,
+                    secret_key=KNOT_AXFR_SECRET_KEY,
+                ),
+                "help": "Нет прав на чтение/запись Secret — проверьте RBAC (k8s/60-dnsadmin-rbac.yaml).",
+            },
+        )
     data = _read_knot_conf_map(core)
     knot_conf = data.get("knot.conf") or ""
     try:

@@ -14,6 +14,19 @@ from typing import Any
 from app.knot_yaml import parse_knot_conf, serialize_knot_conf
 
 
+def knot_conf_needs_axfr(knot_conf_text: str) -> bool:
+    """Нужен ли для conf-check фрагмент include из /etc/knot/ (как в pod)."""
+    zdoc = parse_knot_conf(knot_conf_text)
+    if not isinstance(zdoc, dict):
+        return False
+    inc = zdoc.get("include")
+    if isinstance(inc, str) and inc.startswith("/etc/knot/"):
+        return True
+    if isinstance(inc, list):
+        return any(isinstance(x, str) and x.startswith("/etc/knot/") for x in inc)
+    return False
+
+
 @dataclass
 class KnotcCheckResult:
     ok: bool
@@ -91,13 +104,7 @@ def run_knotc_conf_check(
             ran=False,
         )
 
-    needs_axfr = False
-    if isinstance(zdoc, dict):
-        inc = zdoc.get("include")
-        if isinstance(inc, str) and inc.startswith("/etc/knot/"):
-            needs_axfr = True
-        elif isinstance(inc, list):
-            needs_axfr = any(isinstance(x, str) and x.startswith("/etc/knot/") for x in inc)
+    needs_axfr = knot_conf_needs_axfr(knot_conf_text)
 
     if needs_axfr and not (axfr_yaml and axfr_yaml.strip()):
         return KnotcCheckResult(

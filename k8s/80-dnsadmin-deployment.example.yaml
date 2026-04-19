@@ -24,7 +24,7 @@ spec:
       #   - name: your-registry-credentials
       containers:
         - name: dnsadmin
-          image: example.invalid/dns-knot/dnsadmin:0.2.0
+          image: example.invalid/dns-knot/dnsadmin:0.3.1
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -42,9 +42,10 @@ spec:
               value: knot
             - name: DNS_HEALTH_PROBE_ZONE
               value: cluster.example
-            # Опционально: явный хост для SOA/DS-проб (если ClusterIP не подходит)
+            # Опционально: явный хост для SOA/DS-проб (перекрывает server.listen в knot.conf)
             # - name: KNOT_DNS_PROBE_HOST
             #   value: "192.0.2.1"
+            # Если не задан — бэкенд берёт первый не-wildcard адрес из server.listen в ConfigMap.
             - name: JWT_SECRET
               valueFrom:
                 secretKeyRef:

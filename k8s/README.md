@@ -31,7 +31,7 @@
 ## Где что лежит (ConfigMap / Secret / pod)
 
 - **Основной конфиг Knot:** ConfigMap `knot-config`, ключ `knot.conf` (в dnsadmin: вкладки «Форма» / «YAML» для `knot.conf`).
-- **TSIG и ACL для AXFR:** Secret `knot-axfr`, ключ `axfr.conf` (YAML-фрагменты `key:` и `acl:`). В `knot.conf` обычно есть `include` на путь внутри контейнера, например `/etc/knot/conf.d/axfr.conf`.
+- **TSIG и ACL для AXFR:** Secret `knot-axfr`, ключ `axfr.conf` (YAML-фрагменты `key:` и `acl:`). В `knot.conf` обычно есть `include` на путь внутри контейнера, например `/etc/knot/conf.d/axfr.conf`. Скрипт генерации фрагмента (Docker + `keymgr`): `../scripts/generate-axfr-tsig.sh` относительно этого каталога `k8s/`.
 - **Pod Knot** (см. пример `40-knot-deployment.example.yaml` в этом каталоге) монтирует:
   - `knot.conf` из ConfigMap (subPath);
   - каталог зон из того же ConfigMap в `/zones`;

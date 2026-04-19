@@ -28,7 +28,16 @@ export type DnssecPatchResponse = {
 export type DnssecDsResponse = { ds: string[]; message: string };
 export type ZoneResponse = { zone: string; content: string };
 export type ValidateResponse = { valid: boolean; errors: string[] };
-export type DnsHealthResponse = { ok: boolean; message: string; latency_ms: number | null };
+export type DnsHealthResponse = {
+  ok: boolean;
+  message: string;
+  latency_ms: number | null;
+  /** Куда ушёл UDP SOA (имя или IP). Старый API может не отдавать поле. */
+  probe_host?: string;
+  /** KNOT_DNS_PROBE_HOST | knot.conf.listen | knot_pod_ip | KNOT_DNS_HOST */
+  probe_source?: string;
+  probe_port?: number;
+};
 
 export type SoaForm = {
   ttl: number;
@@ -75,12 +84,31 @@ export function emptyZoneForm(): ZoneFormModel {
   return { soa: defaultSoa(), ns: [{ host: "" }], records: [] };
 }
 
+/** Диагностика AXFR Secret в ответе validate и GET /api/knot-conf/axfr-status */
+export type AxfrClusterDiag = {
+  readable: boolean;
+  code: string;
+  message: string;
+  hints: string[];
+  namespace: string;
+  secret_name: string;
+  secret_key: string;
+  keys_in_data: string[];
+  http_status: number | null;
+};
+
 /** Ответ POST /api/knot-conf/validate */
 export type KnotConfValidateResponse = {
   ok: boolean;
   yaml_ok: boolean;
   yaml_error?: string | null;
   knotc: { ran: boolean; ok: boolean; message: string } | null;
+  axfr?: {
+    config_includes_knot_path: boolean;
+    source: string;
+    cluster: AxfrClusterDiag | null;
+    hints: string[];
+  } | null;
 };
 
 export type KnotConfGetResponse = {

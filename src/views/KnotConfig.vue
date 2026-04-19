@@ -15,6 +15,14 @@
             <span v-if="dnsHealth.latency_ms != null" class="lat"> {{ dnsHealth.latency_ms }} ms</span>
           </el-tag>
           <el-tag v-else type="danger" size="small">{{ dnsHealth.message }}</el-tag>
+          <span
+            v-if="dnsHealth?.probe_host != null && dnsHealth.probe_host !== ''"
+            class="muted probe-hint"
+            :title="dnsProbeTitle(dnsHealth)"
+          >
+            → {{ dnsHealth.probe_host }}:{{ dnsHealth.probe_port ?? 53 }}
+            <span class="probe-src">({{ dnsHealth.probe_source }})</span>
+          </span>
           <el-button link size="small" :loading="dnsHealthLoading" @click="fetchDnsHealth">Обновить</el-button>
         </div>
       </div>
@@ -160,24 +168,52 @@
 
         <el-tab-pane label="AXFR (Secret)" name="axfr">
           <el-alert
-            v-if="!axfrAvailable"
+            v-if="axfrStatus && !axfrStatus.readable"
             type="warning"
             show-icon
             :closable="false"
-            title="Secret недоступен (RBAC или объект отсутствует) — правка только вручную / kubectl."
+            :title="`Secret AXFR: ${axfrStatus.code} — ${axfrStatus.message}`"
             class="mb12"
-          />
-          <div v-else class="form-actions mb12">
+          >
+            <ul v-if="axfrStatus.hints.length" class="hint-list">
+              <li v-for="(h, i) in axfrStatus.hints" :key="i">{{ h }}</li>
+            </ul>
+          </el-alert>
+          <div class="form-actions mb12">
             <el-button @click="loadAxfr" :loading="axfrLoading">Загрузить</el-button>
+            <el-button @click="loadAxfrStatus" :loading="axfrStatusLoading">Диагностика</el-button>
+            <el-button @click="generateTsig" :loading="tsigGenLoading">Сгенерировать TSIG</el-button>
             <el-button @click="validateAxfrFragment" :loading="axfrValidateLoading">Проверить с текущим knot.conf</el-button>
-            <el-button type="success" @click="saveAxfr" :loading="axfrSaving">Сохранить Secret и перезапустить Knot</el-button>
+            <el-button
+              type="success"
+              @click="saveAxfr"
+              :loading="axfrSaving"
+              :disabled="axfrStatus?.code === 'not_found' || axfrStatus?.code === 'forbidden'"
+            >
+              Сохранить Secret и перезапустить Knot
+            </el-button>
           </div>
+          <p v-if="axfrStatus?.code === 'not_found'" class="muted mb12">
+            Пока Secret нет: сгенерируйте TSIG, вставьте YAML ниже, создайте Secret в кластере (`kubectl create secret generic … --from-file=…`), затем сохраните из UI.
+          </p>
           <el-input v-model="axfrContent" type="textarea" :rows="22" class="mono" placeholder="key: / acl:" />
         </el-tab-pane>
       </el-tabs>
 
       <el-card v-if="validateResult" shadow="never" class="mt12">
         <template #header>Результат проверки</template>
+        <el-alert
+          v-if="validateAxfrHints.length"
+          type="warning"
+          show-icon
+          :closable="false"
+          title="AXFR / Secret"
+          class="mb12"
+        >
+          <ul class="hint-list">
+            <li v-for="(h, i) in validateAxfrHints" :key="i">{{ h }}</li>
+          </ul>
+        </el-alert>
         <pre class="mono pre-block">{{ validateResultText }}</pre>
       </el-card>
     </el-main>
@@ -192,6 +228,7 @@ import { useRouter } from "vue-router";
 import {
   api,
   AUTH_TOKEN_KEY,
+  type AxfrClusterDiag,
   type DnsHealthResponse,
   type KnotConfGetResponse,
   type KnotConfModel,
@@ -226,6 +263,9 @@ const axfrAvailable = ref(true);
 const axfrLoading = ref(false);
 const axfrSaving = ref(false);
 const axfrValidateLoading = ref(false);
+const axfrStatus = ref<AxfrClusterDiag | null>(null);
+const axfrStatusLoading = ref(false);
+const tsigGenLoading = ref(false);
 
 const serverSection = computed(() => schema.value?.sections.find((s) => s.id === "server") ?? null);
 const includeSection = computed(() => schema.value?.sections.find((s) => s.id === "include") ?? null);
@@ -236,6 +276,11 @@ const validateResultText = computed(() => {
   const v = validateResult.value;
   if (!v) return "";
   return JSON.stringify(v, null, 2);
+});
+
+const validateAxfrHints = computed(() => {
+  const h = validateResult.value?.axfr?.hints;
+  return Array.isArray(h) ? h : [];
 });
 
 function fieldKey(f: KnotSchemaField): string {
@@ -299,6 +344,19 @@ function ensureServerKeysFromSchema() {
   }
 }
 
+const DNS_PROBE_SOURCE_HINT: Record<string, string> = {
+  KNOT_DNS_PROBE_HOST: "переменная KNOT_DNS_PROBE_HOST",
+  "knot.conf.listen": "server.listen в knot.conf (ConfigMap)",
+  knot_pod_ip: "IP pod Knot",
+  KNOT_DNS_HOST: "имя KNOT_DNS_HOST",
+};
+
+function dnsProbeTitle(h: DnsHealthResponse): string {
+  const src = h.probe_source ?? "";
+  const from = DNS_PROBE_SOURCE_HINT[src] ?? src;
+  return `UDP SOA на ${h.probe_host}:${h.probe_port ?? 53}. Откуда адрес: ${from}.`;
+}
+
 async function fetchDnsHealth() {
   dnsHealthLoading.value = true;
   try {
@@ -341,23 +399,59 @@ async function reloadModel() {
   }
 }
 
+async function loadAxfrStatus() {
+  axfrStatusLoading.value = true;
+  try {
+    const { data } = await api.get<AxfrClusterDiag>("/api/knot-conf/axfr-status");
+    axfrStatus.value = data;
+  } catch {
+    axfrStatus.value = null;
+  } finally {
+    axfrStatusLoading.value = false;
+  }
+}
+
 async function loadAxfr() {
   axfrLoading.value = true;
   try {
     const { data } = await api.get<{ content: string }>("/api/knot-conf/axfr");
     axfrContent.value = data.content;
     axfrAvailable.value = true;
-  } catch {
+    await loadAxfrStatus();
+  } catch (e) {
     axfrAvailable.value = false;
     axfrContent.value = "";
+    const det = (e as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail;
+    if (det && typeof det === "object" && det !== null && "hints" in det) {
+      axfrStatus.value = det as AxfrClusterDiag;
+    } else {
+      await loadAxfrStatus();
+    }
   } finally {
     axfrLoading.value = false;
   }
 }
 
+async function generateTsig() {
+  tsigGenLoading.value = true;
+  try {
+    const { data } = await api.post<{ yaml: string; key_id: string }>("/api/knot-conf/axfr/generate-tsig", {
+      with_acl: true,
+    });
+    axfrContent.value = data.yaml;
+    ElMessage.success(
+      `Сгенерирован TSIG «${data.key_id}». Проверьте ACL (адреса вторичек), затем сохраните или создайте Secret в кластере.`,
+    );
+  } catch (e) {
+    ElMessage.error(messageFromAxios(e, "Не удалось сгенерировать TSIG"));
+  } finally {
+    tsigGenLoading.value = false;
+  }
+}
+
 async function loadAll() {
   await loadSchema();
-  await Promise.all([reloadRaw(), reloadModel(), loadAxfr()]);
+  await Promise.all([reloadRaw(), reloadModel(), loadAxfrStatus(), loadAxfr()]);
 }
 
 async function validateCurrent(source: "yaml" | "form") {
@@ -515,6 +609,16 @@ onMounted(async () => {
   gap: 8px;
   flex-wrap: wrap;
 }
+.probe-hint {
+  font-size: 12px;
+  max-width: min(420px, 40vw);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.probe-src {
+  opacity: 0.82;
+}
 .muted {
   color: var(--el-text-color-secondary);
   font-size: 13px;
@@ -562,6 +666,11 @@ onMounted(async () => {
 }
 .note-p {
   margin: 0 0 8px;
+  font-size: 13px;
+}
+.hint-list {
+  margin: 8px 0 0;
+  padding-left: 1.2em;
   font-size: 13px;
 }
 </style>
