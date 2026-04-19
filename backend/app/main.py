@@ -15,7 +15,10 @@ from fastapi.responses import FileResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.staticfiles import StaticFiles
 from kubernetes import client, config
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+
+from app.dns_probe import knot_probe_from_env
+from app.zone_editor import form_to_zone_text, validate_zonefile, zone_text_to_form
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +52,38 @@ class ZoneBody(BaseModel):
     content: str
 
 
+class ZoneValidateBody(BaseModel):
+    content: str
+
+
+class SoaFormModel(BaseModel):
+    ttl: int = Field(default=3600, ge=1, le=2147483647)
+    primary_ns: str = ""
+    admin_email: str = ""
+    serial: int = Field(default=1, ge=0)
+    refresh: int = Field(default=7200, ge=1)
+    retry: int = Field(default=3600, ge=1)
+    expire: int = Field(default=1209600, ge=1)
+    minimum: int = Field(default=300, ge=1)
+
+
+class NsRowModel(BaseModel):
+    host: str = ""
+
+
+class RecordRowModel(BaseModel):
+    name: str = "@"
+    ttl: int | None = None
+    rtype: str = "A"
+    value: str = ""
+
+
+class ZoneEditorFormModel(BaseModel):
+    soa: SoaFormModel
+    ns: list[NsRowModel] = Field(default_factory=list)
+    records: list[RecordRowModel] = Field(default_factory=list)
+
+
 class LoginBody(BaseModel):
     username: str
     password: str
@@ -78,10 +113,10 @@ def ensure_zone_in_knot_conf(knot_conf: str, zone_name: str) -> str:
     if re.search(rf"(?m)^\s*-\s*domain:\s*{re.escape(zone_name)}\s*$", knot_conf):
         return knot_conf
     block = (
-        f"      - domain: {zone_name}\n"
-        f"        file: /zones/{zone_name}.zone\n"
-        f"        acl: [axfr-allowed]\n"
-        f"        dnssec-signing: off\n"
+        f"  - domain: {zone_name}\n"
+        f"    file: /zones/{zone_name}.zone\n"
+        f"    acl: [axfr-allowed]\n"
+        f"    dnssec-signing: off\n"
     )
     return knot_conf.rstrip() + "\n\n" + block + "\n"
 
@@ -137,6 +172,13 @@ def health() -> Dict[str, str]:
     return {"status": "ok"}
 
 
+@app.get("/api/dns-health")
+def dns_health(_: Dict[str, Any] = Depends(get_current_user)) -> Dict[str, Any]:
+    """Проверка: Knot отвечает на SOA (UDP). Хост: KNOT_DNS_HOST, зона: DNS_HEALTH_PROBE_ZONE."""
+    ok, msg, ms = knot_probe_from_env()
+    return {"ok": ok, "message": msg, "latency_ms": round(ms, 2) if ms is not None else None}
+
+
 @app.post("/api/auth/login", response_model=TokenResponse)
 def login(body: LoginBody) -> TokenResponse:
     if body.username != ADMIN_USERNAME or body.password != ADMIN_PASSWORD:
@@ -156,6 +198,64 @@ def list_zones(_: Dict[str, Any] = Depends(get_current_user)) -> Dict[str, list]
     return {"zones": keys}
 
 
+@app.post("/api/zones/{zone_name}/validate")
+def validate_zone(
+    zone_name: str,
+    body: ZoneValidateBody,
+    _: Dict[str, Any] = Depends(get_current_user),
+) -> Dict[str, Any]:
+    validate_zone_name(zone_name)
+    ok, errs = validate_zonefile(zone_name, body.content)
+    return {"valid": ok, "errors": errs}
+
+
+@app.post("/api/zones/{zone_name}/parse-form")
+def parse_zone_form(
+    zone_name: str,
+    body: ZoneValidateBody,
+    _: Dict[str, Any] = Depends(get_current_user),
+) -> Dict[str, Any]:
+    validate_zone_name(zone_name)
+    try:
+        form = zone_text_to_form(zone_name, body.content)
+        return {"form": form}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@app.post("/api/zones/{zone_name}/render-form")
+def render_zone_form(
+    zone_name: str,
+    body: ZoneEditorFormModel,
+    _: Dict[str, Any] = Depends(get_current_user),
+) -> Dict[str, str]:
+    validate_zone_name(zone_name)
+    try:
+        text = form_to_zone_text(zone_name, body.model_dump())
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    ok, errs = validate_zonefile(zone_name, text)
+    if not ok:
+        raise HTTPException(status_code=400, detail=errs)
+    return {"content": text}
+
+
+@app.put("/api/zones/{zone_name}/form")
+def save_zone_form(
+    zone_name: str,
+    body: ZoneEditorFormModel,
+    _: Dict[str, Any] = Depends(get_current_user),
+) -> Dict[str, str]:
+    validate_zone_name(zone_name)
+    try:
+        text = form_to_zone_text(zone_name, body.model_dump())
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return _apply_zone_update(zone_name, text)
+
+
 @app.get("/api/zones/{zone_name}")
 def get_zone(zone_name: str, _: Dict[str, Any] = Depends(get_current_user)) -> Dict[str, str]:
     validate_zone_name(zone_name)
@@ -168,20 +268,18 @@ def get_zone(zone_name: str, _: Dict[str, Any] = Depends(get_current_user)) -> D
     return {"zone": zone_name, "content": data[key]}
 
 
-@app.put("/api/zones/{zone_name}")
-def update_zone(
-    zone_name: str,
-    body: ZoneBody,
-    _: Dict[str, Any] = Depends(get_current_user),
-) -> Dict[str, str]:
+def _apply_zone_update(zone_name: str, content: str) -> Dict[str, str]:
     validate_zone_name(zone_name)
+    ok, errs = validate_zonefile(zone_name, content)
+    if not ok:
+        raise HTTPException(status_code=400, detail=errs)
     core, apps = get_clients()
     cm = core.read_namespaced_config_map(CONFIGMAP_NAME, NAMESPACE)
     if cm.data is None:
         cm.data = {}
     key = f"{zone_name}.zone"
     is_new = key not in cm.data
-    cm.data[key] = body.content
+    cm.data[key] = content
     if is_new and cm.data.get("knot.conf"):
         cm.data["knot.conf"] = ensure_zone_in_knot_conf(cm.data["knot.conf"], zone_name)
     core.patch_namespaced_config_map(CONFIGMAP_NAME, NAMESPACE, cm)
@@ -200,6 +298,15 @@ def update_zone(
     }
     apps.patch_namespaced_deployment(KNOT_DEPLOYMENT, NAMESPACE, patch)
     return {"status": "ok", "restarted_at": ts}
+
+
+@app.put("/api/zones/{zone_name}")
+def update_zone(
+    zone_name: str,
+    body: ZoneBody,
+    _: Dict[str, Any] = Depends(get_current_user),
+) -> Dict[str, str]:
+    return _apply_zone_update(zone_name, body.content)
 
 
 def _install_spa(app: FastAPI) -> None:

@@ -17,3 +17,50 @@ api.interceptors.request.use((config) => {
 
 export type ZonesResponse = { zones: string[] };
 export type ZoneResponse = { zone: string; content: string };
+export type ValidateResponse = { valid: boolean; errors: string[] };
+export type DnsHealthResponse = { ok: boolean; message: string; latency_ms: number | null };
+
+export type SoaForm = {
+  ttl: number;
+  primary_ns: string;
+  admin_email: string;
+  serial: number;
+  refresh: number;
+  retry: number;
+  expire: number;
+  minimum: number;
+};
+
+export type NsRow = { host: string };
+
+export type RecordRow = {
+  name: string;
+  /** Пусто — в файле не пишется отдельный TTL (берётся $TTL). */
+  ttl?: number;
+  rtype: string;
+  value: string;
+};
+
+export type ZoneFormModel = {
+  soa: SoaForm;
+  ns: NsRow[];
+  records: RecordRow[];
+};
+
+export function defaultSoa(): SoaForm {
+  const serial = Number(`${new Date().toISOString().slice(0, 10).replace(/-/g, "")}01`);
+  return {
+    ttl: 300,
+    primary_ns: "",
+    admin_email: "",
+    serial,
+    refresh: 7200,
+    retry: 3600,
+    expire: 1209600,
+    minimum: 300,
+  };
+}
+
+export function emptyZoneForm(): ZoneFormModel {
+  return { soa: defaultSoa(), ns: [{ host: "" }], records: [] };
+}
