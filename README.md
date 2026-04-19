@@ -54,3 +54,4 @@ kubectl apply -k ..
 ```
 
 Далее соберите и запушьте образ `dnsadmin`, примените манифесты.
+# dns-knot-admin
