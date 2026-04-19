@@ -3,6 +3,10 @@
     <el-header class="header">
       <div class="title-row">
         <div class="title">dnsadmin</div>
+        <nav class="nav-links">
+          <router-link class="nav-link" to="/">Зоны</router-link>
+          <router-link class="nav-link" to="/knot-conf">knot.conf</router-link>
+        </nav>
         <div class="dns-status">
           <span class="muted">Knot:</span>
           <el-tag v-if="dnsHealth === null" type="info" size="small">проверка…</el-tag>
@@ -628,6 +632,19 @@ onUnmounted(() => {
   gap: 16px;
 }
 .title {
+  font-weight: 600;
+}
+.nav-links {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+.nav-link {
+  color: var(--el-color-primary);
+  text-decoration: none;
+  font-size: 14px;
+}
+.nav-link.router-link-active {
   font-weight: 600;
 }
 .dns-status {

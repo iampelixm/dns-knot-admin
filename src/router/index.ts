@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory } from "vue-router";
 import Login from "../views/Login.vue";
+import KnotConfig from "../views/KnotConfig.vue";
 import Zones from "../views/Zones.vue";
 
 import { AUTH_TOKEN_KEY } from "../api/client";
@@ -13,6 +14,7 @@ const router = createRouter({
   routes: [
     { path: "/login", name: "login", component: Login, meta: { public: true } },
     { path: "/", name: "zones", component: Zones },
+    { path: "/knot-conf", name: "knot-conf", component: KnotConfig },
   ],
 });
 

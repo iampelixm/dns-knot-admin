@@ -1,0 +1,113 @@
+{
+  "version": "1",
+  "sections": [
+    {
+      "id": "server",
+      "title": "Server",
+      "doc": "Глобальные параметры сервера Knot (секция server в knot.conf).",
+      "fields": [
+        {
+          "path": ["server", "listen"],
+          "label": "listen",
+          "type": "string",
+          "widget": "textarea",
+          "placeholder": "0.0.0.0@53 или несколько строк",
+          "doc": "Адрес и порт прослушивания. Несколько значений в YAML задаются списком; в форме — по одному адресу на строку."
+        },
+        {
+          "path": ["server", "identity"],
+          "label": "identity",
+          "type": "string",
+          "doc": "Идентификатор сервера (CH TXT id.server.)."
+        },
+        {
+          "path": ["server", "nsid"],
+          "label": "nsid",
+          "type": "string",
+          "doc": "NSID (EDNS, RFC 5001) для идентификации сервера в ответах."
+        },
+        {
+          "path": ["server", "automatic-acl"],
+          "label": "automatic-acl",
+          "type": "enum",
+          "enum": ["on", "off"],
+          "default": "off",
+          "doc": "Автоматические ACL для NOTIFY и зонных переносов (XFR) между первичным и вторичным, если remotes заданы в конфигурации."
+        }
+      ]
+    },
+    {
+      "id": "include",
+      "title": "Include",
+      "doc": "Подключаемые файлы (часто TSIG и ACL из Secret, смонтированного в pod Knot).",
+      "fields": [
+        {
+          "path": ["include"],
+          "label": "include",
+          "type": "string",
+          "widget": "textarea",
+          "placeholder": "По одному пути на строку, например /etc/knot/conf.d/axfr.conf",
+          "doc": "В knot.conf может быть одна строка include или список. Пути — как внутри контейнера Knot после монтирования volumes."
+        }
+      ]
+    },
+    {
+      "id": "zone",
+      "title": "Зоны (zone)",
+      "repeatable": true,
+      "item_key": "domain",
+      "doc": "Авторитетные зоны. Поле file: обычно указывает на /zones/<имя>.zone — файлы зон часто хранятся в том же ConfigMap, что и knot.conf.",
+      "item_fields": [
+        {
+          "path": ["domain"],
+          "label": "domain",
+          "type": "string",
+          "required": true,
+          "doc": "Имя зоны (FQDN без финальной точки, в формате Knot)."
+        },
+        {
+          "path": ["file"],
+          "label": "file",
+          "type": "string",
+          "doc": "Путь к файлу зоны внутри контейнера Knot."
+        },
+        {
+          "path": ["master"],
+          "label": "master",
+          "type": "string",
+          "widget": "textarea",
+          "placeholder": "remotes или адреса, по одному на строку",
+          "doc": "Для вторичного сервера: адрес или имя remote первичного для AXFR/IXFR."
+        },
+        {
+          "path": ["notify"],
+          "label": "notify",
+          "type": "string",
+          "widget": "textarea",
+          "placeholder": "По одному remote/адресу на строку",
+          "doc": "Для первичного сервера: кому отправлять NOTIFY при обновлении зоны."
+        },
+        {
+          "path": ["acl"],
+          "label": "acl",
+          "type": "string",
+          "widget": "textarea",
+          "placeholder": "Имена ACL через запятую или с новой строки",
+          "doc": "Список идентификаторов ACL из конфигурации, применяемых к этой зоне."
+        },
+        {
+          "path": ["dnssec-signing"],
+          "label": "dnssec-signing",
+          "type": "enum",
+          "enum": ["on", "off"],
+          "default": "off",
+          "doc": "Включение или выключение DNSSEC-подписи зоны средствами Knot."
+        }
+      ]
+    }
+  ],
+  "secrets_note": {
+    "title": "TSIG и ACL в Secret",
+    "doc": "Ключи и ACL для AXFR часто хранят в отдельном Kubernetes Secret и монтируют в Knot как файл (пример см. в каталоге k8s репозитория: 20-knot-axfr-secret.example.yaml и 40-knot-deployment.example.yaml). Редактор knot.conf в админке не вставляет секрет в ConfigMap; для смены TSIG/ACL используйте вкладку AXFR или правку Secret."
+  }
+}

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import datetime as dt
 import logging
 import os
@@ -17,7 +18,12 @@ from fastapi.staticfiles import StaticFiles
 from kubernetes import client, config
 from pydantic import BaseModel, Field
 
-from app.dns_probe import knot_probe_from_env
+from app.dns_probe import knot_probe
+from app.dnssec_ds import fetch_ds_records_for_zone
+from app.knot_conf import list_zone_dnssec_flags, set_zone_dnssec_signing, zone_declared_in_knot_conf
+from app.knot_editor_model import KnotEditorModel, apply_editor_model, extract_editor_model
+from app.knot_validate import run_knotc_conf_check
+from app.knot_yaml import load_schema, parse_knot_conf, serialize_knot_conf
 from app.zone_editor import form_to_zone_text, validate_zonefile, zone_text_to_form
 
 logger = logging.getLogger(__name__)
@@ -26,6 +32,8 @@ NAMESPACE = os.environ.get("NAMESPACE", "dns-knot")
 CONFIGMAP_NAME = os.environ.get("KNOT_CONFIGMAP_NAME", "knot-config")
 KNOT_DEPLOYMENT = os.environ.get("KNOT_DEPLOYMENT_NAME", "knot")
 DEFAULT_ZONE = os.environ.get("DEFAULT_ZONE", "k3s.local")
+KNOT_AXFR_SECRET_NAME = os.environ.get("KNOT_AXFR_SECRET_NAME", "knot-axfr")
+KNOT_AXFR_SECRET_KEY = os.environ.get("KNOT_AXFR_SECRET_KEY", "axfr.conf")
 
 ADMIN_USERNAME = os.environ.get("ADMIN_USERNAME", "admin")
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "change-me")
@@ -40,7 +48,7 @@ STATIC_DIR = Path(os.environ.get("STATIC_DIR", "")).resolve() if os.environ.get(
 
 bearer_scheme = HTTPBearer(auto_error=False)
 
-app = FastAPI(title="dnsadmin", version="2.0.0", docs_url=None, redoc_url=None)
+app = FastAPI(title="dnsadmin", version="2.1.0", docs_url=None, redoc_url=None)
 
 
 def get_clients():
@@ -48,8 +56,80 @@ def get_clients():
     return client.CoreV1Api(), client.AppsV1Api()
 
 
+def _read_knot_conf_map(core: client.CoreV1Api) -> Dict[str, str]:
+    cm = core.read_namespaced_config_map(CONFIGMAP_NAME, NAMESPACE)
+    return dict(cm.data or {})
+
+
+def _zone_files_from_cm(data: Dict[str, str]) -> Dict[str, str]:
+    return {k: v for k, v in data.items() if k.endswith(".zone")}
+
+
+def _read_axfr_secret(core: client.CoreV1Api) -> str | None:
+    try:
+        sec = core.read_namespaced_secret(KNOT_AXFR_SECRET_NAME, NAMESPACE)
+    except Exception:  # noqa: BLE001 — Secret может отсутствовать или RBAC
+        return None
+    raw = (sec.data or {}).get(KNOT_AXFR_SECRET_KEY)
+    if not raw:
+        return None
+    try:
+        return base64.b64decode(raw).decode("utf-8")
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _validate_knot_conf_bundle(
+    knot_conf: str,
+    cm_data: Dict[str, str],
+    *,
+    axfr_override: str | None = None,
+) -> Dict[str, Any]:
+    try:
+        parse_knot_conf(knot_conf)
+    except Exception as e:  # noqa: BLE001
+        return {
+            "ok": False,
+            "yaml_ok": False,
+            "yaml_error": str(e),
+            "knotc": None,
+        }
+    core, _ = get_clients()
+    if axfr_override is not None:
+        axfr = axfr_override
+    else:
+        axfr = _read_axfr_secret(core)
+    res = run_knotc_conf_check(knot_conf, _zone_files_from_cm(cm_data), axfr_yaml=axfr)
+    return {
+        "ok": res.ok,
+        "yaml_ok": True,
+        "yaml_error": None,
+        "knotc": {"ran": res.ran, "ok": res.ok, "message": res.message},
+    }
+
+
+def _apply_knot_conf_and_restart(knot_conf: str) -> Dict[str, Any]:
+    core, apps = get_clients()
+    cm = core.read_namespaced_config_map(CONFIGMAP_NAME, NAMESPACE)
+    if cm.data is None:
+        cm.data = {}
+    data = dict(cm.data)
+    validation = _validate_knot_conf_bundle(knot_conf, data)
+    if not validation["ok"]:
+        raise HTTPException(status_code=400, detail=validation)
+    data["knot.conf"] = knot_conf
+    cm.data = data
+    core.patch_namespaced_config_map(CONFIGMAP_NAME, NAMESPACE, cm)
+    ts = _trigger_knot_restart(apps)
+    return {"status": "ok", "restarted_at": ts, "validation": validation}
+
+
 class ZoneBody(BaseModel):
     content: str
+
+
+class DnssecSigningBody(BaseModel):
+    signing: bool
 
 
 class ZoneValidateBody(BaseModel):
@@ -92,6 +172,19 @@ class LoginBody(BaseModel):
 class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
+
+
+class KnotConfRawBody(BaseModel):
+    content: str
+
+
+class KnotConfValidateBody(BaseModel):
+    content: str
+    axfr_override: str | None = None
+
+
+class AxfrConfBody(BaseModel):
+    content: str
 
 
 LABEL_RE = re.compile(r"^(?=.{1,63}$)(?!-)[a-zA-Z0-9-]+(?<!-)$")
@@ -172,11 +265,159 @@ def health() -> Dict[str, str]:
     return {"status": "ok"}
 
 
+def _knot_running_pod_ip() -> str | None:
+    """
+    IP pod Knot (при hostNetwork ≈ адрес listen в knot.conf).
+    ClusterIP сервиса knot при bind только на IP ноды не подходит.
+    """
+    try:
+        core, _ = get_clients()
+        pods = core.list_namespaced_pod(NAMESPACE, label_selector=f"app={KNOT_DEPLOYMENT}")
+    except Exception as e:  # noqa: BLE001
+        logger.debug("list knot pods for dns target: %s", e)
+        return None
+    for pod in pods.items or []:
+        st = pod.status
+        if not st or (st.phase or "").lower() != "running":
+            continue
+        ip = st.pod_ip or st.host_ip
+        if ip:
+            return ip
+    return None
+
+
+def _knot_dns_reachable_host() -> str:
+    """
+    Куда слать DNS-запросы (SOA/DS): явный KNOT_DNS_PROBE_HOST, иначе IP pod Knot, иначе KNOT_DNS_HOST.
+    """
+    h = os.environ.get("KNOT_DNS_PROBE_HOST", "").strip()
+    if h:
+        return h
+    ip = _knot_running_pod_ip()
+    if ip:
+        return ip
+    return os.environ.get("KNOT_DNS_HOST", "knot")
+
+
 @app.get("/api/dns-health")
 def dns_health(_: Dict[str, Any] = Depends(get_current_user)) -> Dict[str, Any]:
-    """Проверка: Knot отвечает на SOA (UDP). Хост: KNOT_DNS_HOST, зона: DNS_HEALTH_PROBE_ZONE."""
-    ok, msg, ms = knot_probe_from_env()
+    """SOA (UDP). Цель: KNOT_DNS_PROBE_HOST → IP pod knot → KNOT_DNS_HOST."""
+    ok, msg, ms = knot_probe(_knot_dns_reachable_host())
     return {"ok": ok, "message": msg, "latency_ms": round(ms, 2) if ms is not None else None}
+
+
+@app.get("/api/knot-conf")
+def get_knot_conf(_: Dict[str, Any] = Depends(get_current_user)) -> Dict[str, Any]:
+    core, _ = get_clients()
+    data = _read_knot_conf_map(core)
+    raw = data.get("knot.conf") or ""
+    schema = load_schema()
+    return {"raw": raw, "schema_version": str(schema.get("version", "1"))}
+
+
+@app.get("/api/knot-conf/schema")
+def get_knot_conf_schema(_: Dict[str, Any] = Depends(get_current_user)) -> Dict[str, Any]:
+    return load_schema()
+
+
+@app.get("/api/knot-conf/model")
+def get_knot_conf_model(_: Dict[str, Any] = Depends(get_current_user)) -> Dict[str, Any]:
+    core, _ = get_clients()
+    raw = (_read_knot_conf_map(core)).get("knot.conf") or ""
+    root = parse_knot_conf(raw)
+    model = extract_editor_model(root)
+    return model.model_dump(mode="json", by_alias=True)
+
+
+@app.post("/api/knot-conf/validate")
+def post_knot_conf_validate(
+    body: KnotConfValidateBody,
+    _: Dict[str, Any] = Depends(get_current_user),
+) -> Dict[str, Any]:
+    core, _ = get_clients()
+    data = _read_knot_conf_map(core)
+    return _validate_knot_conf_bundle(body.content, data, axfr_override=body.axfr_override)
+
+
+@app.post("/api/knot-conf/render-model")
+def post_knot_conf_render_model(
+    body: Dict[str, Any],
+    _: Dict[str, Any] = Depends(get_current_user),
+) -> Dict[str, str]:
+    """Собрать knot.conf из JSON модели без записи в кластер (для проверки / предпросмотра)."""
+    model = KnotEditorModel.model_validate(body)
+    core, _ = get_clients()
+    raw = (_read_knot_conf_map(core)).get("knot.conf") or ""
+    root = parse_knot_conf(raw)
+    new_doc = apply_editor_model(root, model)
+    return {"content": serialize_knot_conf(new_doc)}
+
+
+@app.put("/api/knot-conf")
+def put_knot_conf_raw(
+    body: KnotConfRawBody,
+    _: Dict[str, Any] = Depends(get_current_user),
+) -> Dict[str, Any]:
+    return _apply_knot_conf_and_restart(body.content)
+
+
+@app.put("/api/knot-conf/model")
+def put_knot_conf_model(
+    body: Dict[str, Any],
+    _: Dict[str, Any] = Depends(get_current_user),
+) -> Dict[str, Any]:
+    model = KnotEditorModel.model_validate(body)
+    core, _ = get_clients()
+    raw = (_read_knot_conf_map(core)).get("knot.conf") or ""
+    root = parse_knot_conf(raw)
+    new_doc = apply_editor_model(root, model)
+    text = serialize_knot_conf(new_doc)
+    return _apply_knot_conf_and_restart(text)
+
+
+@app.get("/api/knot-conf/axfr")
+def get_axfr_fragment(_: Dict[str, Any] = Depends(get_current_user)) -> Dict[str, str]:
+    core, _ = get_clients()
+    content = _read_axfr_secret(core)
+    if content is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Secret {KNOT_AXFR_SECRET_NAME!r} недоступен или нет ключа {KNOT_AXFR_SECRET_KEY!r}",
+        )
+    return {"content": content}
+
+
+@app.put("/api/knot-conf/axfr")
+def put_axfr_fragment(
+    body: AxfrConfBody,
+    _: Dict[str, Any] = Depends(get_current_user),
+) -> Dict[str, Any]:
+    core, apps = get_clients()
+    data = _read_knot_conf_map(core)
+    knot_conf = data.get("knot.conf") or ""
+    try:
+        parse_knot_conf(body.content)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=400, detail=f"YAML axfr не разобран: {e}") from e
+    res = run_knotc_conf_check(
+        knot_conf,
+        _zone_files_from_cm(data),
+        axfr_yaml=body.content,
+    )
+    if not res.ok:
+        raise HTTPException(
+            status_code=400,
+            detail={"knotc": {"ran": res.ran, "ok": res.ok, "message": res.message}},
+        )
+    sec = core.read_namespaced_secret(KNOT_AXFR_SECRET_NAME, NAMESPACE)
+    if sec.data is None:
+        sec.data = {}
+    sec.data[KNOT_AXFR_SECRET_KEY] = base64.b64encode(body.content.encode("utf-8")).decode("ascii")
+    if sec.string_data is not None:
+        sec.string_data = None
+    core.replace_namespaced_secret(KNOT_AXFR_SECRET_NAME, NAMESPACE, sec)
+    ts = _trigger_knot_restart(apps)
+    return {"status": "ok", "restarted_at": ts, "knotc": {"ran": res.ran, "ok": res.ok, "message": res.message}}
 
 
 @app.post("/api/auth/login", response_model=TokenResponse)
@@ -187,7 +428,7 @@ def login(body: LoginBody) -> TokenResponse:
 
 
 @app.get("/api/zones")
-def list_zones(_: Dict[str, Any] = Depends(get_current_user)) -> Dict[str, list]:
+def list_zones(_: Dict[str, Any] = Depends(get_current_user)) -> Dict[str, Any]:
     core, _ = get_clients()
     cm = core.read_namespaced_config_map(CONFIGMAP_NAME, NAMESPACE)
     raw = cm.data or {}
@@ -195,7 +436,9 @@ def list_zones(_: Dict[str, Any] = Depends(get_current_user)) -> Dict[str, list]
     if DEFAULT_ZONE in keys:
         keys.remove(DEFAULT_ZONE)
         keys.insert(0, DEFAULT_ZONE)
-    return {"zones": keys}
+    flags = list_zone_dnssec_flags(raw.get("knot.conf") or "")
+    zones = [{"name": z, "dnssec_signing": flags.get(z, False)} for z in keys]
+    return {"zones": zones}
 
 
 @app.post("/api/zones/{zone_name}/validate")
@@ -268,6 +511,81 @@ def get_zone(zone_name: str, _: Dict[str, Any] = Depends(get_current_user)) -> D
     return {"zone": zone_name, "content": data[key]}
 
 
+def _trigger_knot_restart(apps: client.AppsV1Api) -> str:
+    ts = dt.datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
+    patch = {
+        "spec": {
+            "template": {
+                "metadata": {
+                    "annotations": {
+                        "dnsadmin/restarted-at": ts,
+                    }
+                }
+            }
+        }
+    }
+    apps.patch_namespaced_deployment(KNOT_DEPLOYMENT, NAMESPACE, patch)
+    return ts
+
+
+@app.patch("/api/zones/{zone_name}/dnssec")
+def patch_zone_dnssec(
+    zone_name: str,
+    body: DnssecSigningBody,
+    _: Dict[str, Any] = Depends(get_current_user),
+) -> Dict[str, Any]:
+    validate_zone_name(zone_name)
+    core, apps = get_clients()
+    cm = core.read_namespaced_config_map(CONFIGMAP_NAME, NAMESPACE)
+    if cm.data is None:
+        cm.data = {}
+    data = cm.data
+    key = f"{zone_name}.zone"
+    if key not in data:
+        raise HTTPException(status_code=404, detail=f"Зона {zone_name} не найдена")
+    knot_conf = data.get("knot.conf")
+    if not knot_conf:
+        raise HTTPException(status_code=500, detail="В ConfigMap нет knot.conf")
+    if not zone_declared_in_knot_conf(knot_conf, zone_name):
+        raise HTTPException(
+            status_code=400,
+            detail="Зона не объявлена в knot.conf — добавьте зону или исправьте конфиг вручную",
+        )
+    try:
+        data["knot.conf"] = set_zone_dnssec_signing(knot_conf, zone_name, body.signing)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    core.patch_namespaced_config_map(CONFIGMAP_NAME, NAMESPACE, cm)
+    ts = _trigger_knot_restart(apps)
+    return {"status": "ok", "restarted_at": ts, "dnssec_signing": body.signing}
+
+
+@app.get("/api/zones/{zone_name}/dnssec-ds")
+def get_zone_dnssec_ds(
+    zone_name: str,
+    _: Dict[str, Any] = Depends(get_current_user),
+) -> Dict[str, Any]:
+    validate_zone_name(zone_name)
+    core, _ = get_clients()
+    cm = core.read_namespaced_config_map(CONFIGMAP_NAME, NAMESPACE)
+    raw = cm.data or {}
+    flags = list_zone_dnssec_flags(raw.get("knot.conf") or "")
+    if not flags.get(zone_name, False):
+        raise HTTPException(
+            status_code=404,
+            detail="Для зоны выключено dnssec-signing в knot.conf",
+        )
+    host = _knot_dns_reachable_host()
+    port = int(os.environ.get("KNOT_DNS_PORT", "53"))
+    try:
+        ds_list, msg = fetch_ds_records_for_zone(host, zone_name, port=port)
+    except OSError as e:
+        raise HTTPException(status_code=502, detail=str(e)) from e
+    if not ds_list:
+        raise HTTPException(status_code=404, detail=msg)
+    return {"ds": ds_list, "message": msg}
+
+
 def _apply_zone_update(zone_name: str, content: str) -> Dict[str, str]:
     validate_zone_name(zone_name)
     ok, errs = validate_zonefile(zone_name, content)
@@ -284,19 +602,7 @@ def _apply_zone_update(zone_name: str, content: str) -> Dict[str, str]:
         cm.data["knot.conf"] = ensure_zone_in_knot_conf(cm.data["knot.conf"], zone_name)
     core.patch_namespaced_config_map(CONFIGMAP_NAME, NAMESPACE, cm)
 
-    ts = dt.datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
-    patch = {
-        "spec": {
-            "template": {
-                "metadata": {
-                    "annotations": {
-                        "dnsadmin/restarted-at": ts
-                    }
-                }
-            }
-        }
-    }
-    apps.patch_namespaced_deployment(KNOT_DEPLOYMENT, NAMESPACE, patch)
+    ts = _trigger_knot_restart(apps)
     return {"status": "ok", "restarted_at": ts}
 
 

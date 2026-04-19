@@ -15,7 +15,17 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
-export type ZonesResponse = { zones: string[] };
+export type ZoneSummary = { name: string; dnssec_signing: boolean };
+
+export type ZonesResponse = { zones: ZoneSummary[] };
+
+export type DnssecPatchResponse = {
+  status: string;
+  restarted_at: string;
+  dnssec_signing: boolean;
+};
+
+export type DnssecDsResponse = { ds: string[]; message: string };
 export type ZoneResponse = { zone: string; content: string };
 export type ValidateResponse = { valid: boolean; errors: string[] };
 export type DnsHealthResponse = { ok: boolean; message: string; latency_ms: number | null };
@@ -64,3 +74,67 @@ export function defaultSoa(): SoaForm {
 export function emptyZoneForm(): ZoneFormModel {
   return { soa: defaultSoa(), ns: [{ host: "" }], records: [] };
 }
+
+/** Ответ POST /api/knot-conf/validate */
+export type KnotConfValidateResponse = {
+  ok: boolean;
+  yaml_ok: boolean;
+  yaml_error?: string | null;
+  knotc: { ran: boolean; ok: boolean; message: string } | null;
+};
+
+export type KnotConfGetResponse = {
+  raw: string;
+  schema_version: string;
+};
+
+export type KnotConfSaveResponse = {
+  status: string;
+  restarted_at: string;
+  validation: KnotConfValidateResponse;
+};
+
+export type KnotSchemaField = {
+  path: string[];
+  label: string;
+  type: string;
+  enum?: string[];
+  default?: string;
+  widget?: string;
+  placeholder?: string;
+  doc?: string;
+  doc_url?: string;
+  required?: boolean;
+};
+
+export type KnotSchemaSection = {
+  id: string;
+  title: string;
+  doc?: string;
+  doc_url?: string;
+  fields?: KnotSchemaField[];
+  repeatable?: boolean;
+  item_key?: string;
+  item_fields?: KnotSchemaField[];
+};
+
+export type KnotSchemaResponse = {
+  version: string;
+  knot_doc_base?: string;
+  sections: KnotSchemaSection[];
+  secrets_note?: { title: string; doc: string; doc_url?: string };
+};
+
+export type KnotConfModel = {
+  server: Record<string, string>;
+  include: string;
+  zone: Array<{
+    domain: string;
+    file: string;
+    master: string;
+    notify: string;
+    acl: string;
+    "dnssec-signing": string;
+  }>;
+  form_parse_warning?: string | null;
+};

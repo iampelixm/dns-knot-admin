@@ -57,7 +57,14 @@ def _response_has_soa(resp: dns.message.Message) -> bool:
     return False
 
 
+def knot_probe(host: str, zone: str | None = None, port: int | None = None, timeout: float = 2.0) -> Tuple[bool, str, Optional[float]]:
+    """SOA по UDP на host (имя или IP). Зона и порт из env, если не переданы."""
+    z = (zone or os.environ.get("DNS_HEALTH_PROBE_ZONE") or os.environ.get("DEFAULT_ZONE") or "k3s.local").strip()
+    p = int(os.environ.get("KNOT_DNS_PORT", "53")) if port is None else port
+    return check_authoritative_soa(host, z, port=p, timeout=timeout)
+
+
 def knot_probe_from_env() -> Tuple[bool, str, Optional[float]]:
+    """Устаревший путь: только KNOT_DNS_HOST (часто ClusterIP, не слушает Knot при hostNetwork)."""
     host = os.environ.get("KNOT_DNS_HOST", "knot")
-    zone = os.environ.get("DNS_HEALTH_PROBE_ZONE", os.environ.get("DEFAULT_ZONE", "k3s.local"))
-    return check_authoritative_soa(host, zone)
+    return knot_probe(host)

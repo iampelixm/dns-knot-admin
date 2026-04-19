@@ -4,3 +4,5 @@ kubernetes>=31
 pydantic>=2
 PyJWT[crypto]>=2.9
 dnspython>=2.6
+ruamel.yaml>=0.18
+pytest>=8.0
