@@ -1,0 +1,18 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: knot
+  namespace: dns-knot
+spec:
+  selector:
+    app: knot
+  ports:
+    - name: dns-udp
+      port: 53
+      targetPort: 53
+      protocol: UDP
+    - name: dns-tcp
+      port: 53
+      targetPort: 53
+      protocol: TCP
+  type: ClusterIP

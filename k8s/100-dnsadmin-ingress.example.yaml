@@ -1,0 +1,22 @@
+# Подставьте ingressClassName, аннотации и host под ваш ingress-контроллер.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: dnsadmin
+  namespace: dns-knot
+  annotations:
+    # Пример для Traefik:
+    # traefik.ingress.kubernetes.io/router.entrypoints: web
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: dnsadmin.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: dnsadmin
+                port:
+                  number: 80

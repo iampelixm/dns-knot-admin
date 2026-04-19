@@ -108,6 +108,6 @@
   ],
   "secrets_note": {
     "title": "TSIG и ACL в Secret",
-    "doc": "Ключи и ACL для AXFR часто хранят в отдельном Kubernetes Secret и монтируют в Knot как файл (пример см. в каталоге k8s репозитория: 20-knot-axfr-secret.example.yaml и 40-knot-deployment.example.yaml). Редактор knot.conf в админке не вставляет секрет в ConfigMap; для смены TSIG/ACL используйте вкладку AXFR или правку Secret."
+    "doc": "Ключи и ACL для AXFR часто хранят в отдельном Kubernetes Secret и монтируют в Knot как файл (примеры: k8s/20-knot-axfr-secret.example.yaml и k8s/40-knot-deployment.example.yaml в этом репозитории). Редактор knot.conf в админке не вставляет секрет в ConfigMap; для смены TSIG/ACL используйте вкладку AXFR или правку Secret."
   }
 }

@@ -1,0 +1,81 @@
+# Образ dnsadmin: соберите из репозитория dnsadmin-ui или укажите свой registry.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dnsadmin
+  namespace: dns-knot
+  labels:
+    app: dnsadmin
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: dnsadmin
+  template:
+    metadata:
+      labels:
+        app: dnsadmin
+    spec:
+      serviceAccountName: dnsadmin
+      # Пример: dnsadmin на control-plane (не обязательно для вашего кластера)
+      nodeSelector:
+        kubernetes.io/os: linux
+      # imagePullSecrets:
+      #   - name: your-registry-credentials
+      containers:
+        - name: dnsadmin
+          image: example.invalid/dns-knot/dnsadmin:0.2.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: NAMESPACE
+              value: dns-knot
+            - name: KNOT_CONFIGMAP_NAME
+              value: knot-config
+            - name: KNOT_DEPLOYMENT_NAME
+              value: knot
+            - name: DEFAULT_ZONE
+              value: cluster.example
+            - name: KNOT_DNS_HOST
+              value: knot
+            - name: DNS_HEALTH_PROBE_ZONE
+              value: cluster.example
+            # Опционально: явный хост для SOA/DS-проб (если ClusterIP не подходит)
+            # - name: KNOT_DNS_PROBE_HOST
+            #   value: "192.0.2.1"
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: dnsadmin-auth
+                  key: JWT_SECRET
+            - name: ADMIN_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: dnsadmin-auth
+                  key: ADMIN_USERNAME
+            - name: ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: dnsadmin-auth
+                  key: ADMIN_PASSWORD
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 15
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 400m
+              memory: 512Mi

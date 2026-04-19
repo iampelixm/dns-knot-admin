@@ -35,7 +35,7 @@
 ### Kubernetes / документация
 
 - **RBAC** (`dnsadmin-rbac.yaml`): для ServiceAccount `dnsadmin` добавлены права на Secret **`knot-axfr`** (`get`, `patch`, `update`) — чтение и обновление AXFR-фрагмента из админки.
-- **Документация в репозитории:** файл `k8s/README.md` (каталог `k8s/`) — ConfigMap / Secret / монтирование в pod, NOTIFY/AXFR между провайдерами, переменные `KNOT_AXFR_SECRET_NAME` / `KNOT_AXFR_SECRET_KEY`; корневой `CONFIG_RUNBOOK.md` только отсылает туда.
+- **Документация в репозитории:** каталог **`k8s/`** в корне dnsadmin-ui (`k8s/README.md`) — ConfigMap / Secret / монтирование в pod, NOTIFY/AXFR между провайдерами, переменные `KNOT_AXFR_SECRET_NAME` / `KNOT_AXFR_SECRET_KEY`; вне репозитория короткая отсылка в `CONFIG_RUNBOOK.md` у стека `configs/dns-knot`.
 - **Комментарий** в `knot-deployment.yaml` у volume Secret `knot-axfr` — отсылка на `k8s/README.md` в репозитории.
 
 ### Тесты

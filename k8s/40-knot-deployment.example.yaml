@@ -1,0 +1,86 @@
+# hostNetwork + bind на конкретный IP: пробы tcpSocket.host должны указывать на тот же хост:порт, где слушает Knot.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: knot
+  namespace: dns-knot
+  labels:
+    app: knot
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: knot
+  template:
+    metadata:
+      labels:
+        app: knot
+    spec:
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      nodeSelector:
+        dns-server: "true"
+      containers:
+        - name: knot
+          image: cznic/knot:3.4
+          imagePullPolicy: IfNotPresent
+          command:
+            - knotd
+          args:
+            - -c
+            - /etc/knot/knot.conf
+          ports:
+            - name: dns-udp
+              containerPort: 53
+              protocol: UDP
+            - name: dns-tcp
+              containerPort: 53
+              protocol: TCP
+          volumeMounts:
+            - name: knot-config
+              mountPath: /etc/knot/knot.conf
+              subPath: knot.conf
+              readOnly: true
+            - name: knot-zones
+              mountPath: /zones
+              readOnly: true
+            - name: knot-axfr
+              mountPath: /etc/knot/conf.d/axfr.conf
+              subPath: axfr.conf
+              readOnly: true
+            - name: knot-data
+              mountPath: /var/lib/knot
+          readinessProbe:
+            tcpSocket:
+              host: 192.0.2.1
+              port: 53
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              host: 192.0.2.1
+              port: 53
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+      volumes:
+        - name: knot-config
+          configMap:
+            name: knot-config
+        - name: knot-zones
+          configMap:
+            name: knot-config
+        - name: knot-axfr
+          secret:
+            secretName: knot-axfr
+        - name: knot-data
+          persistentVolumeClaim:
+            claimName: knot-data

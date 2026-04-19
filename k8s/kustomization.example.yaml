@@ -1,0 +1,27 @@
+# Пример kustomization.yaml: скопируйте в корень стека или используйте как шаблон.
+# Раскомментируйте/добавьте свои zone-файлы в configMapGenerator при необходимости.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: dns-knot
+
+resources:
+  - 00-namespace.yaml
+  - 10-knot-pvc.yaml
+  - 20-knot-axfr-secret.example.yaml
+  - 30-knot-configmap.example.yaml
+  - 40-knot-deployment.example.yaml
+  - 50-knot-service.yaml
+  - 60-dnsadmin-rbac.yaml
+  - 70-dnsadmin-auth-secret.example.yaml
+  - 80-dnsadmin-deployment.example.yaml
+  - 90-dnsadmin-service.yaml
+  - 100-dnsadmin-ingress.example.yaml
+
+# Пример добавления зон из файлов рядом с kustomization:
+# configMapGenerator:
+#   - name: knot-config
+#     behavior: merge
+#     files:
+#       - zones/extra.zone
+#     options:
+#       disableNameSuffixHash: true

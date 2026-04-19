@@ -1,0 +1,40 @@
+# Пример ConfigMap: knot.conf + одна зона. Замените listen/identity и содержимое зоны.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: knot-config
+  namespace: dns-knot
+data:
+  knot.conf: |
+    server:
+      listen: 0.0.0.0@53
+      identity: ns1.example.com
+      nsid: ns1.example.com
+
+    log:
+      - target: stdout
+        any: info
+
+    database:
+      storage: /var/lib/knot
+
+    include: /etc/knot/conf.d/axfr.conf
+
+    zone:
+      - domain: cluster.example
+        file: /zones/cluster.example.zone
+        acl: [axfr-allowed]
+        dnssec-signing: off
+
+  cluster.example.zone: |
+    $ORIGIN cluster.example.
+    $TTL 300
+    @ IN SOA ns1.cluster.example. hostmaster.cluster.example. (
+      2026010101 ; serial
+      7200       ; refresh
+      3600       ; retry
+      1209600    ; expire
+      300        ; minimum
+    )
+    @   IN NS   ns1.cluster.example.
+    ns1 IN A    192.0.2.10
