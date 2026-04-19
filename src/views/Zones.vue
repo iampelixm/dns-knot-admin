@@ -35,117 +35,150 @@
         </el-col>
       </el-row>
 
-      <el-tabs v-model="activeTab" type="border-card">
-        <el-tab-pane label="Форма (SOA / NS / записи)" name="form">
-          <el-space direction="vertical" alignment="stretch" style="width: 100%" :size="12">
-            <el-alert
-              v-if="formParseError"
-              type="warning"
-              :closable="false"
-              :title="formParseError"
-              show-icon
-            />
-            <div class="form-actions">
-              <el-button @click="syncFormFromText" :loading="formLoading">Загрузить поля из текста</el-button>
-              <el-button @click="applyFormToText" :loading="renderLoading">Перенести в текст (без сохранения)</el-button>
-              <el-button type="success" @click="saveFromForm" :loading="formSaving">Сохранить из формы</el-button>
-            </div>
+      <el-card v-if="selectedZone" class="dnssec-card" shadow="never">
+        <template #header>DNSSEC (Knot)</template>
+        <el-space direction="vertical" alignment="stretch" style="width: 100%" :size="10">
+          <el-alert
+            type="info"
+            show-icon
+            :closable="false"
+            title="После включения подписи опубликуйте DS-записи у регистратора родительской зоны."
+          />
+          <div class="dnssec-row">
+            <span class="dnssec-label">Подписывать зону</span>
+            <el-switch v-model="dnssecLocal" />
+            <el-button
+              type="primary"
+              :loading="dnssecSaving"
+              :disabled="!dnssecDirty"
+              @click="applyDnssec"
+            >
+              Применить в knot.conf
+            </el-button>
+          </div>
+          <div>
+            <el-button :loading="dsLoading" @click="openDsDialog">Показать DS (SHA-256) для регистратора</el-button>
+          </div>
+        </el-space>
+      </el-card>
 
-            <el-card shadow="never">
-              <template #header>SOA</template>
-              <el-form :model="formModel.soa" label-width="160px" class="soa-form">
-                <el-form-item label="$TTL / SOA TTL">
-                  <el-input-number v-model="formModel.soa.ttl" :min="1" :step="60" controls-position="right" />
-                </el-form-item>
-                <el-form-item label="Primary NS (mname)">
-                  <el-input v-model="formModel.soa.primary_ns" placeholder="ns1.example.com" clearable />
-                </el-form-item>
-                <el-form-item label="Почта админа">
-                  <el-input v-model="formModel.soa.admin_email" placeholder="hostmaster@example.com" clearable />
-                </el-form-item>
-                <el-form-item label="Serial">
-                  <el-input-number v-model="formModel.soa.serial" :min="0" :step="1" controls-position="right" />
-                </el-form-item>
-                <el-form-item label="Refresh">
-                  <el-input-number v-model="formModel.soa.refresh" :min="1" :step="60" controls-position="right" />
-                </el-form-item>
-                <el-form-item label="Retry">
-                  <el-input-number v-model="formModel.soa.retry" :min="1" :step="60" controls-position="right" />
-                </el-form-item>
-                <el-form-item label="Expire">
-                  <el-input-number v-model="formModel.soa.expire" :min="1" :step="3600" controls-position="right" />
-                </el-form-item>
-                <el-form-item label="Minimum">
-                  <el-input-number v-model="formModel.soa.minimum" :min="1" :step="60" controls-position="right" />
-                </el-form-item>
-              </el-form>
-            </el-card>
+      <div class="zone-editor">
+        <div class="tab-toolbar">
+          <el-alert
+            v-if="formParseError && activeTab !== 'text'"
+            type="warning"
+            :closable="false"
+            :title="formParseError"
+            show-icon
+            class="tab-toolbar-alert"
+          />
+          <div v-if="activeTab === 'text'" class="form-actions">
+            <el-button @click="validateText" :loading="validateLoading">Проверить синтаксис</el-button>
+            <el-button type="success" @click="saveZone" :loading="saving">Сохранить и перезагрузить Knot</el-button>
+          </div>
+          <div v-else class="form-actions">
+            <el-button @click="syncFormFromText" :loading="formLoading">Загрузить поля из текста</el-button>
+            <el-button @click="applyFormToText" :loading="renderLoading">Перенести в текст (без сохранения)</el-button>
+            <el-button type="success" @click="saveFromForm" :loading="formSaving">Сохранить из формы</el-button>
+          </div>
+        </div>
 
-            <el-card shadow="never">
-              <template #header>NS</template>
-              <el-table :data="formModel.ns" border size="small">
-                <el-table-column label="Сервер имён">
-                  <template #default="{ row }">
-                    <el-input v-model="row.host" placeholder="ns1.example.com" clearable />
-                  </template>
-                </el-table-column>
-                <el-table-column width="90" align="center">
-                  <template #default="{ $index }">
-                    <el-button link type="danger" @click="removeNs($index)">Удалить</el-button>
-                  </template>
-                </el-table-column>
-              </el-table>
-              <el-button class="mt8" size="small" @click="addNs">Добавить NS</el-button>
-            </el-card>
+        <el-tabs v-model="activeTab" type="border-card" class="zone-editor-tabs">
+          <el-tab-pane label="Записи" name="records">
+          <el-card shadow="never">
+            <template #header>A / AAAA / MX / TXT / CNAME …</template>
+            <el-table :data="formModel.records" border size="small">
+              <el-table-column label="Имя" width="140">
+                <template #default="{ row }">
+                  <el-input v-model="row.name" placeholder="@" clearable />
+                </template>
+              </el-table-column>
+              <el-table-column label="TTL" width="120">
+                <template #default="{ row }">
+                  <el-input-number
+                    v-model="row.ttl"
+                    :min="1"
+                    :step="60"
+                    controls-position="right"
+                    class="ttl-input"
+                  />
+                </template>
+              </el-table-column>
+              <el-table-column label="Тип" width="130">
+                <template #default="{ row }">
+                  <el-select v-model="row.rtype" filterable>
+                    <el-option v-for="t in recordTypes" :key="t" :label="t" :value="t" />
+                  </el-select>
+                </template>
+              </el-table-column>
+              <el-table-column label="Значение">
+                <template #default="{ row }">
+                  <el-input v-model="row.value" placeholder="1.2.3.4 или 10 mail.example.com" clearable />
+                </template>
+              </el-table-column>
+              <el-table-column width="90" align="center">
+                <template #default="{ $index }">
+                  <el-button link type="danger" @click="removeRec($index)">Удалить</el-button>
+                </template>
+              </el-table-column>
+            </el-table>
+            <el-button class="mt8" size="small" @click="addRec">Добавить запись</el-button>
+          </el-card>
+          </el-tab-pane>
 
-            <el-card shadow="never">
-              <template #header>Записи (A / AAAA / MX / TXT / CNAME …)</template>
-              <el-table :data="formModel.records" border size="small">
-                <el-table-column label="Имя" width="140">
-                  <template #default="{ row }">
-                    <el-input v-model="row.name" placeholder="@" clearable />
-                  </template>
-                </el-table-column>
-                <el-table-column label="TTL" width="120">
-                  <template #default="{ row }">
-                    <el-input-number
-                      v-model="row.ttl"
-                      :min="1"
-                      :step="60"
-                      controls-position="right"
-                      class="ttl-input"
-                    />
-                  </template>
-                </el-table-column>
-                <el-table-column label="Тип" width="130">
-                  <template #default="{ row }">
-                    <el-select v-model="row.rtype" filterable>
-                      <el-option v-for="t in recordTypes" :key="t" :label="t" :value="t" />
-                    </el-select>
-                  </template>
-                </el-table-column>
-                <el-table-column label="Значение">
-                  <template #default="{ row }">
-                    <el-input v-model="row.value" placeholder="1.2.3.4 или 10 mail.example.com" clearable />
-                  </template>
-                </el-table-column>
-                <el-table-column width="90" align="center">
-                  <template #default="{ $index }">
-                    <el-button link type="danger" @click="removeRec($index)">Удалить</el-button>
-                  </template>
-                </el-table-column>
-              </el-table>
-              <el-button class="mt8" size="small" @click="addRec">Добавить запись</el-button>
-            </el-card>
-          </el-space>
-        </el-tab-pane>
+          <el-tab-pane label="SOA" name="soa">
+          <el-card shadow="never">
+            <template #header>SOA</template>
+            <el-form :model="formModel.soa" label-width="160px" class="soa-form">
+              <el-form-item label="$TTL / SOA TTL">
+                <el-input-number v-model="formModel.soa.ttl" :min="1" :step="60" controls-position="right" />
+              </el-form-item>
+              <el-form-item label="Primary NS (mname)">
+                <el-input v-model="formModel.soa.primary_ns" placeholder="ns1.example.com" clearable />
+              </el-form-item>
+              <el-form-item label="Почта админа">
+                <el-input v-model="formModel.soa.admin_email" placeholder="hostmaster@example.com" clearable />
+              </el-form-item>
+              <el-form-item label="Serial">
+                <el-input-number v-model="formModel.soa.serial" :min="0" :step="1" controls-position="right" />
+              </el-form-item>
+              <el-form-item label="Refresh">
+                <el-input-number v-model="formModel.soa.refresh" :min="1" :step="60" controls-position="right" />
+              </el-form-item>
+              <el-form-item label="Retry">
+                <el-input-number v-model="formModel.soa.retry" :min="1" :step="60" controls-position="right" />
+              </el-form-item>
+              <el-form-item label="Expire">
+                <el-input-number v-model="formModel.soa.expire" :min="1" :step="3600" controls-position="right" />
+              </el-form-item>
+              <el-form-item label="Minimum">
+                <el-input-number v-model="formModel.soa.minimum" :min="1" :step="60" controls-position="right" />
+              </el-form-item>
+            </el-form>
+          </el-card>
+          </el-tab-pane>
 
-        <el-tab-pane label="Текст (zone file)" name="text">
+          <el-tab-pane label="NS" name="ns">
+          <el-card shadow="never">
+            <template #header>Серверы имён зоны</template>
+            <el-table :data="formModel.ns" border size="small">
+              <el-table-column label="Сервер имён">
+                <template #default="{ row }">
+                  <el-input v-model="row.host" placeholder="ns1.example.com" clearable />
+                </template>
+              </el-table-column>
+              <el-table-column width="90" align="center">
+                <template #default="{ $index }">
+                  <el-button link type="danger" @click="removeNs($index)">Удалить</el-button>
+                </template>
+              </el-table-column>
+            </el-table>
+            <el-button class="mt8" size="small" @click="addNs">Добавить NS</el-button>
+          </el-card>
+          </el-tab-pane>
+
+          <el-tab-pane label="Текст зоны" name="text">
           <el-space direction="vertical" alignment="stretch" style="width: 100%" :size="8">
-            <div class="form-actions">
-              <el-button @click="validateText" :loading="validateLoading">Проверить синтаксис</el-button>
-              <el-button type="success" @click="saveZone" :loading="saving">Сохранить и перезагрузить Knot</el-button>
-            </div>
             <el-alert v-if="validateMessage" :type="validateOk ? 'success' : 'error'" :closable="false" show-icon>
               {{ validateMessage }}
             </el-alert>
@@ -157,8 +190,9 @@
               class="mono"
             />
           </el-space>
-        </el-tab-pane>
-      </el-tabs>
+          </el-tab-pane>
+        </el-tabs>
+      </div>
 
       <el-dialog v-model="createDialogVisible" title="Новая зона" width="560px" @closed="resetCreateForm">
         <el-form label-position="top">
@@ -177,12 +211,21 @@
           <el-button type="primary" :loading="creating" @click="submitNewZone">Создать</el-button>
         </template>
       </el-dialog>
+
+      <el-dialog v-model="dsDialogVisible" title="DS для регистратора" width="640px" @closed="dsDialogText = ''">
+        <el-alert v-if="dsDialogHint" type="warning" :closable="false" show-icon :title="dsDialogHint" class="mb12" />
+        <el-input v-model="dsDialogText" type="textarea" :rows="8" readonly class="mono" />
+        <template #footer>
+          <el-button @click="dsDialogVisible = false">Закрыть</el-button>
+          <el-button type="primary" :disabled="!dsDialogText" @click="copyDsToClipboard">Копировать</el-button>
+        </template>
+      </el-dialog>
     </el-main>
   </el-container>
 </template>
 
 <script setup lang="ts">
-import { onMounted, onUnmounted, reactive, ref, toRaw } from "vue";
+import { computed, onMounted, onUnmounted, reactive, ref, toRaw } from "vue";
 import { useRouter } from "vue-router";
 import { ElMessage } from "element-plus";
 import {
@@ -190,7 +233,9 @@ import {
   AUTH_TOKEN_KEY,
   emptyZoneForm,
   type DnsHealthResponse,
+  type DnssecDsResponse,
   type ZoneFormModel,
+  type ZoneSummary,
   type ZonesResponse,
   type ZoneResponse,
   type ValidateResponse,
@@ -198,7 +243,8 @@ import {
 
 const router = useRouter();
 
-const zones = ref<string[]>([]);
+const zoneSummaries = ref<ZoneSummary[]>([]);
+const zones = computed(() => zoneSummaries.value.map((z) => z.name));
 const selectedZone = ref("");
 const content = ref("");
 const loading = ref(false);
@@ -208,7 +254,7 @@ const newZoneName = ref("");
 const newZoneContent = ref("");
 const creating = ref(false);
 
-const activeTab = ref<"form" | "text">("form");
+const activeTab = ref<"records" | "soa" | "ns" | "text">("records");
 const formModel = reactive<ZoneFormModel>(emptyZoneForm());
 const formLoading = ref(false);
 const formSaving = ref(false);
@@ -222,6 +268,67 @@ const validateOk = ref(false);
 const dnsHealth = ref<DnsHealthResponse | null>(null);
 const dnsHealthLoading = ref(false);
 let dnsTimer: ReturnType<typeof setInterval> | null = null;
+
+const dnssecLocal = ref(false);
+const dnssecServer = ref(false);
+const dnssecSaving = ref(false);
+const dnssecDirty = computed(() => dnssecLocal.value !== dnssecServer.value);
+
+const dsLoading = ref(false);
+const dsDialogVisible = ref(false);
+const dsDialogText = ref("");
+const dsDialogHint = ref("");
+
+function syncDnssecFromServer() {
+  const s = zoneSummaries.value.find((z) => z.name === selectedZone.value);
+  const v = s?.dnssec_signing ?? false;
+  dnssecServer.value = v;
+  dnssecLocal.value = v;
+}
+
+async function applyDnssec() {
+  if (!selectedZone.value) return;
+  dnssecSaving.value = true;
+  try {
+    await api.patch(`/api/zones/${encodeURIComponent(selectedZone.value)}/dnssec`, {
+      signing: dnssecLocal.value,
+    });
+    ElMessage.success("knot.conf обновлён, Knot перезапускается");
+    await loadZones();
+    syncDnssecFromServer();
+  } catch (e) {
+    ElMessage.error(messageFromAxios(e, "Не удалось обновить DNSSEC"));
+  } finally {
+    dnssecSaving.value = false;
+  }
+}
+
+async function openDsDialog() {
+  if (!selectedZone.value) return;
+  dsLoading.value = true;
+  dsDialogHint.value = "";
+  try {
+    const { data } = await api.get<DnssecDsResponse>(
+      `/api/zones/${encodeURIComponent(selectedZone.value)}/dnssec-ds`,
+    );
+    dsDialogText.value = data.ds.join("\n");
+    dsDialogHint.value = data.message || "";
+    dsDialogVisible.value = true;
+  } catch (e) {
+    ElMessage.warning(messageFromAxios(e, "DS недоступны (подпись выключена или DNSKEY ещё не в эфире)"));
+  } finally {
+    dsLoading.value = false;
+  }
+}
+
+async function copyDsToClipboard() {
+  try {
+    await navigator.clipboard.writeText(dsDialogText.value);
+    ElMessage.success("Скопировано в буфер");
+  } catch {
+    ElMessage.error("Не удалось скопировать");
+  }
+}
 
 const recordTypes = ["A", "AAAA", "MX", "TXT", "CNAME", "PTR", "SRV", "NS"];
 
@@ -347,10 +454,11 @@ async function fetchDnsHealth() {
 
 async function loadZones() {
   const { data } = await api.get<ZonesResponse>("/api/zones");
-  zones.value = data.zones;
+  zoneSummaries.value = data.zones;
   if (!selectedZone.value && data.zones.length) {
-    selectedZone.value = data.zones[0]!;
+    selectedZone.value = data.zones[0]!.name;
   }
+  syncDnssecFromServer();
 }
 
 async function loadZone() {
@@ -370,6 +478,7 @@ async function loadZone() {
 }
 
 async function onZoneChange() {
+  syncDnssecFromServer();
   await loadZone();
 }
 
@@ -557,5 +666,35 @@ onUnmounted(() => {
 }
 .ttl-input {
   width: 110px;
+}
+.dnssec-card {
+  margin-bottom: 16px;
+}
+.dnssec-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+.dnssec-label {
+  font-size: 14px;
+}
+.zone-editor {
+  width: 100%;
+}
+.tab-toolbar {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.tab-toolbar-alert {
+  width: 100%;
+}
+.zone-editor-tabs {
+  width: 100%;
+}
+.mb12 {
+  margin-bottom: 12px;
 }
 </style>
