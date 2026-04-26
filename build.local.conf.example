@@ -1,0 +1,5 @@
+# Скопируйте в build.local.conf и заполните своими значениями.
+# build.local.conf — в .gitignore, не коммитить!
+REGISTRY=registry.example.com/dns-knot
+REGISTRY_USER=myuser
+REGISTRY_PASSWORD=mypassword

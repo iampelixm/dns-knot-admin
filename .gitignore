@@ -5,3 +5,5 @@ node_modules/
 .env
 .env.*
 !.env.example
+deploy/
+build.local.conf

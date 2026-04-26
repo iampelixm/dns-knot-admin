@@ -1,0 +1,40 @@
+$ORIGIN example.test.
+$TTL 300
+
+@ IN SOA ns1.example.test. hostmaster.example.test. (
+  2026042501 ; serial
+  3600       ; refresh
+  900        ; retry
+  604800     ; expire
+  300        ; minimum
+)
+
+; NS — все три сервера
+@   IN NS   ns1.example.test.
+@   IN NS   ns2.example.test.
+@   IN NS   ns3.example.test.
+
+; glue-записи для NS
+ns1 IN A    172.30.0.10
+ns2 IN A    172.30.0.11
+ns3 IN A    172.30.0.12
+
+; основные записи зоны
+@   IN A    172.30.0.10
+@   IN MX   10 mail.example.test.
+@   IN TXT  "v=spf1 a mx ~all"
+
+www     IN A    172.30.0.10
+www     IN AAAA ::1
+api     IN A    172.30.0.10
+mail    IN A    172.30.0.10
+ftp     IN CNAME www.example.test.
+dev     IN A    172.30.0.10
+
+; DMARC / DKIM-заглушки
+_dmarc  IN TXT  "v=DMARC1; p=none; rua=mailto:dmarc@example.test"
+default._domainkey IN TXT "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GN"
+
+; SRV-пример (XMPP)
+_xmpp-client._tcp IN SRV 5 0 5222 xmpp.example.test.
+xmpp    IN A    172.30.0.10

@@ -1,0 +1,68 @@
+name: knot-playground
+
+networks:
+  dns:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.30.0.0/24
+
+volumes:
+  knot-primary-data:
+  knot-secondary1-data:
+  knot-secondary2-data:
+
+services:
+
+  knot-primary:
+    image: cznic/knot:3.4
+    container_name: knot-primary
+    hostname: ns1.example.test
+    command: [knotd, -c, /etc/knot/knot.conf]
+    networks:
+      dns:
+        ipv4_address: 172.30.0.10
+    ports:
+      - "15353:53/udp"
+      - "15353:53/tcp"
+    volumes:
+      - ./primary/knot.conf:/etc/knot/knot.conf:ro
+      - ./zones:/zones:ro
+      - knot-primary-data:/var/lib/knot
+    restart: unless-stopped
+
+  knot-secondary1:
+    image: cznic/knot:3.4
+    container_name: knot-secondary1
+    hostname: ns2.example.test
+    command: [knotd, -c, /etc/knot/knot.conf]
+    networks:
+      dns:
+        ipv4_address: 172.30.0.11
+    ports:
+      - "15354:53/udp"
+      - "15354:53/tcp"
+    volumes:
+      - ./secondary1/knot.conf:/etc/knot/knot.conf:ro
+      - knot-secondary1-data:/var/lib/knot
+    depends_on:
+      - knot-primary
+    restart: unless-stopped
+
+  knot-secondary2:
+    image: cznic/knot:3.4
+    container_name: knot-secondary2
+    hostname: ns3.example.test
+    command: [knotd, -c, /etc/knot/knot.conf]
+    networks:
+      dns:
+        ipv4_address: 172.30.0.12
+    ports:
+      - "15355:53/udp"
+      - "15355:53/tcp"
+    volumes:
+      - ./secondary2/knot.conf:/etc/knot/knot.conf:ro
+      - knot-secondary2-data:/var/lib/knot
+    depends_on:
+      - knot-primary
+    restart: unless-stopped

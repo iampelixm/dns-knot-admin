@@ -1,0 +1,28 @@
+$ORIGIN db.test.
+$TTL 120
+
+@ IN SOA ns1.example.test. hostmaster.example.test. (
+  2026042501 ; serial
+  3600       ; refresh
+  900        ; retry
+  604800     ; expire
+  120        ; minimum
+)
+
+@       IN NS   ns1.example.test.
+@       IN NS   ns2.example.test.
+@       IN NS   ns3.example.test.
+
+; зона для тестирования рассинхрона:
+; измени serial здесь и пересохрани без --notify чтобы сымитировать отставание secondary
+
+primary IN A    172.30.0.10
+replica1 IN A   172.30.0.11
+replica2 IN A   172.30.0.12
+
+postgres IN CNAME primary.db.test.
+mysql    IN CNAME primary.db.test.
+redis    IN A    172.30.0.10
+
+; SRV для postgres
+_postgresql._tcp IN SRV 0 0 5432 postgres.db.test.

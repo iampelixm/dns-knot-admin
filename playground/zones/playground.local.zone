@@ -1,0 +1,36 @@
+$ORIGIN playground.local.
+$TTL 60
+
+@ IN SOA ns1.example.test. hostmaster.example.test. (
+  2026042501 ; serial
+  3600       ; refresh
+  900        ; retry
+  604800     ; expire
+  60         ; minimum
+)
+
+@       IN NS   ns1.example.test.
+@       IN NS   ns2.example.test.
+@       IN NS   ns3.example.test.
+
+; инфраструктура playground
+@       IN A    172.30.0.10
+primary IN A    172.30.0.10
+ns1     IN A    172.30.0.10
+
+ns2     IN A    172.30.0.11
+slave1  IN A    172.30.0.11
+
+ns3     IN A    172.30.0.12
+slave2  IN A    172.30.0.12
+
+; сервисы
+api     IN A    172.30.0.10
+db      IN CNAME primary.playground.local.
+cache   IN A    172.30.0.11
+worker1 IN A    172.30.0.11
+worker2 IN A    172.30.0.12
+
+; TXT для проверки синхронизации
+@       IN TXT  "playground-zone-v1"
+sync    IN TXT  "если этот ответ одинаковый на всех трёх серверах — зоны синхронизированы"
