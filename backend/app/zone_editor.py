@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import datetime
 import re
 from typing import Any, Dict, List, Tuple
 
@@ -31,6 +32,72 @@ def validate_zonefile(zone_name: str, text: str) -> Tuple[bool, List[str]]:
         return False, [str(e)]
     except Exception as e:  # noqa: BLE001
         return False, [str(e)]
+
+
+def bump_soa_serial(current_serial: int) -> int:
+    """Вычисляет следующий SOA serial.
+
+    Если serial в формате YYYYMMDDnn (10 цифр, дата валидна):
+      - если дата совпадает с сегодняшней — инкрементирует nn (max 99)
+      - если дата раньше сегодняшней — возвращает YYYYMMDD01 сегодня
+    Иначе: serial + 1.
+    """
+    s = str(current_serial)
+    today = datetime.date.today()
+    today_prefix = today.strftime("%Y%m%d")
+    if len(s) == 10 and s[:8].isdigit():
+        try:
+            datetime.date(int(s[:4]), int(s[4:6]), int(s[6:8]))
+        except ValueError:
+            return current_serial + 1
+        nn = int(s[8:])
+        if s[:8] == today_prefix:
+            return int(today_prefix + f"{min(nn + 1, 99):02d}")
+        return int(today_prefix + "01")
+    return current_serial + 1
+
+
+_SOA_SERIAL_RE = re.compile(
+    r"^(\s*\d+\s*;\s*serial\s*)$",
+    re.IGNORECASE | re.MULTILINE,
+)
+_SOA_INLINE_RE = re.compile(
+    r"""
+    (IN\s+SOA\s+\S+\s+\S+\s+)   # mname rname
+    (\d+)                        # serial
+    (\s+\d+\s+\d+\s+\d+\s+\d+)  # refresh retry expire minimum
+    """,
+    re.VERBOSE | re.IGNORECASE,
+)
+
+
+def apply_serial_bump(zone_text: str, zone_name: str) -> str:
+    """Инкрементирует SOA serial в тексте зоны. Возвращает изменённый текст."""
+    z = dns.zone.from_text(zone_text, origin=_origin_name(zone_name), relativize=False)
+    origin = z.origin
+    soa_rr = z.get_rdataset(origin, dns.rdatatype.SOA)
+    old_serial = int(soa_rr[0].serial)
+    new_serial = bump_soa_serial(old_serial)
+
+    # Приоритет: многострочный SOA с «; serial»
+    def _replace_comment(m: re.Match) -> str:
+        line = m.group(1)
+        # заменяем первое число в строке
+        return re.sub(r"\d+", str(new_serial), line, count=1)
+
+    updated, n = _SOA_SERIAL_RE.subn(_replace_comment, zone_text)
+    if n:
+        return updated
+
+    # Однострочный SOA
+    def _replace_inline(m: re.Match) -> str:
+        return m.group(1) + str(new_serial) + m.group(3)
+
+    updated, n = _SOA_INLINE_RE.subn(_replace_inline, zone_text)
+    if n:
+        return updated
+
+    return zone_text
 
 
 def _email_to_rname(email: str) -> str:

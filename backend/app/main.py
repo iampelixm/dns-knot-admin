@@ -8,6 +8,7 @@ import json
 import logging
 import os
 import re
+import subprocess
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -27,7 +28,7 @@ from app.knot_conf import list_zone_dnssec_flags, set_zone_dnssec_signing, zone_
 from app.knot_editor_model import KnotEditorModel, apply_editor_model, extract_editor_model
 from app.knot_validate import knot_conf_needs_axfr, run_knotc_conf_check
 from app.knot_yaml import load_schema, parse_knot_conf, serialize_knot_conf
-from app.zone_editor import form_to_zone_text, validate_zonefile, zone_text_to_form
+from app.zone_editor import apply_serial_bump, form_to_zone_text, validate_zonefile, zone_text_to_form
 
 logger = logging.getLogger(__name__)
 
@@ -828,6 +829,28 @@ def _trigger_knot_restart(apps: client.AppsV1Api) -> str:
     return ts
 
 
+def _knotc_zone_notify(zone_name: str) -> bool:
+    """Отправляет knotc zone-notify. Возвращает True при успехе, False при ошибке."""
+    bin_path = os.environ.get("KNOTC_BIN", "knotc")
+    try:
+        proc = subprocess.run(
+            [bin_path, "zone-notify", zone_name],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if proc.returncode != 0:
+            logger.warning("knotc zone-notify %s failed: %s", zone_name, proc.stderr.strip())
+            return False
+        return True
+    except FileNotFoundError:
+        logger.debug("knotc не найден, zone-notify пропущен")
+        return False
+    except Exception:  # noqa: BLE001
+        logger.exception("knotc zone-notify %s: неожиданная ошибка", zone_name)
+        return False
+
+
 @app.patch("/api/zones/{zone_name}/dnssec")
 def patch_zone_dnssec(
     zone_name: str,
@@ -902,13 +925,25 @@ def _apply_zone_update(zone_name: str, content: str) -> Dict[str, str]:
         cm.data = {}
     key = f"{zone_name}.zone"
     is_new = key not in cm.data
+
+    existing = cm.data.get(key, "")
+    if not is_new and existing.strip() == content.strip():
+        return {"status": "no_changes"}
+
+    if not is_new:
+        try:
+            content = apply_serial_bump(content, zone_name)
+        except Exception:  # noqa: BLE001
+            pass  # не ломаем сохранение если bump не удался
+
     cm.data[key] = content
     if is_new and cm.data.get("knot.conf"):
         cm.data["knot.conf"] = ensure_zone_in_knot_conf(cm.data["knot.conf"], zone_name)
     core.patch_namespaced_config_map(CONFIGMAP_NAME, NAMESPACE, cm)
 
     ts = _trigger_knot_restart(apps)
-    return {"status": "ok", "restarted_at": ts}
+    notify_sent = _knotc_zone_notify(zone_name)
+    return {"status": "ok", "restarted_at": ts, "notify_sent": str(notify_sent).lower()}
 
 
 @app.put("/api/zones/{zone_name}")
