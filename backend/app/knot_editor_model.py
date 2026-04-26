@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Any, List, Optional, Union
+from collections.abc import Mapping, Sequence
+from typing import Any, List
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -24,14 +25,6 @@ def _yaml_value_from_lines(text: str, *, as_list: bool) -> Any:
     return lines[0] if len(lines) == 1 else lines
 
 
-def _acl_from_yaml(val: Any) -> str:
-    if val is None:
-        return ""
-    if isinstance(val, list):
-        return "\n".join(str(x) for x in val)
-    return str(val)
-
-
 def _acl_to_yaml(text: str) -> list[str]:
     parts: List[str] = []
     for ln in text.replace(",", "\n").splitlines():
@@ -42,6 +35,22 @@ def _acl_to_yaml(text: str) -> list[str]:
     return parts
 
 
+def _acl_from_yaml(val: Any) -> list[str]:
+    if val is None:
+        return []
+    if isinstance(val, list):
+        return [str(x).strip() for x in val if str(x).strip()]
+    return _acl_to_yaml(str(val))
+
+
+def _acl_list_normalize(val: Any) -> list[str]:
+    if isinstance(val, list):
+        return [str(x).strip() for x in val if str(x).strip()]
+    if val is None or val == "":
+        return []
+    return _acl_to_yaml(str(val))
+
+
 class ZoneFormItem(BaseModel):
     model_config = ConfigDict(extra="ignore", populate_by_name=True)
 
@@ -49,8 +58,13 @@ class ZoneFormItem(BaseModel):
     file: str = ""
     master: str = ""  # textarea
     notify: str = ""
-    acl: str = ""
+    acl: list[str] = Field(default_factory=list)
     dnssec_signing: str = Field(default="off", alias="dnssec-signing")
+
+    @field_validator("acl", mode="before")
+    @classmethod
+    def _acl_in(cls, v: Any) -> list[str]:
+        return _acl_list_normalize(v)
 
     @field_validator("dnssec_signing", mode="before")
     @classmethod
@@ -76,12 +90,12 @@ class KnotEditorModel(BaseModel):
 def extract_editor_model(root: Any) -> KnotEditorModel:
     """Из корня распарсенного knot.conf (dict-like)."""
     warning: str | None = None
-    if not isinstance(root, dict):
+    if not isinstance(root, Mapping):
         return KnotEditorModel(form_parse_warning="Корень конфига не объект YAML")
 
     server_raw = root.get("server")
     server: dict[str, Any] = {}
-    if isinstance(server_raw, dict):
+    if isinstance(server_raw, Mapping):
         for k in ("listen", "identity", "nsid", "automatic-acl"):
             if k in server_raw:
                 v = server_raw[k]
@@ -97,11 +111,11 @@ def extract_editor_model(root: Any) -> KnotEditorModel:
     z = root.get("zone")
     if z is None:
         pass
-    elif not isinstance(z, list):
+    elif isinstance(z, (str, bytes)) or not isinstance(z, Sequence):
         warning = (warning + "; " if warning else "") + "Секция zone не список — пропущена"
     else:
         for item in z:
-            if not isinstance(item, dict):
+            if not isinstance(item, Mapping):
                 continue
             dom = item.get("domain")
             if not dom:
@@ -131,16 +145,16 @@ def apply_editor_model(root: Any, model: KnotEditorModel) -> dict[str, Any]:
     """
     import copy
 
-    if not isinstance(root, dict):
+    if not isinstance(root, Mapping):
         root = {}
     out: dict[str, Any] = copy.deepcopy(root)
 
     # server — только переданные ключи из model.server (не затираем log/database и т.д.)
     srv_in = out.get("server")
-    if not isinstance(srv_in, dict):
-        srv_in = {}
-    else:
+    if isinstance(srv_in, Mapping):
         srv_in = dict(srv_in)
+    else:
+        srv_in = {}
     for k, v in model.server.items():
         if v is None or v == "":
             srv_in.pop(k, None)
@@ -182,9 +196,8 @@ def apply_editor_model(root: Any, model: KnotEditorModel) -> dict[str, Any]:
         n = _yaml_value_from_lines(z.notify, as_list=True)
         if n:
             block["notify"] = n[0] if len(n) == 1 else n
-        acl = _acl_to_yaml(z.acl)
-        if acl:
-            block["acl"] = acl[0] if len(acl) == 1 else acl
+        if z.acl:
+            block["acl"] = z.acl[0] if len(z.acl) == 1 else z.acl
         block["dnssec-signing"] = z.dnssec_signing
         zlist.append(block)
     out["zone"] = zlist

@@ -24,7 +24,7 @@ spec:
       #   - name: your-registry-credentials
       containers:
         - name: dnsadmin
-          image: example.invalid/dns-knot/dnsadmin:0.3.1
+          image: example.invalid/dns-knot/dnsadmin:0.3.3
           imagePullPolicy: IfNotPresent
           ports:
             - name: http

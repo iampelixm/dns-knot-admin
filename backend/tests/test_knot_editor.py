@@ -28,7 +28,7 @@ def test_extract_roundtrip_model() -> None:
     assert len(m.zone) == 1
     assert m.zone[0].domain == "k3s.local"
     assert m.zone[0].dnssec_signing == "on"
-    assert "axfr-allowed" in m.zone[0].acl
+    assert m.zone[0].acl == ["axfr-allowed"]
 
 
 def test_apply_preserves_log() -> None:
@@ -73,3 +73,24 @@ def test_put_model_json_shape() -> None:
     root["zone"] = []
     out = apply_editor_model(root, model)
     assert out["zone"][0]["domain"] == "z.test"
+    assert out["zone"][0]["acl"] == "axfr-allowed"
+
+
+def test_put_model_acl_as_list() -> None:
+    body = {
+        "server": {"listen": "0.0.0.0@53", "automatic-acl": "off"},
+        "include": "",
+        "zone": [
+            {
+                "domain": "a.example",
+                "file": "/zones/a.example.zone",
+                "acl": ["axfr-allowed", "other-acl"],
+                "dnssec-signing": "off",
+            }
+        ],
+    }
+    model = KnotEditorModel.model_validate(body)
+    root = parse_knot_conf("server: {}\nzone: []\n")
+    root["zone"] = []
+    out = apply_editor_model(root, model)
+    assert out["zone"][0]["acl"] == ["axfr-allowed", "other-acl"]

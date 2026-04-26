@@ -3,16 +3,16 @@
   "sections": [
     {
       "id": "server",
-      "title": "Server",
-      "doc": "Глобальные параметры сервера Knot (секция server в knot.conf).",
+      "title": "Сервер: identity, nsid, automatic-acl",
+      "doc": "Поля Knot server (кроме listen — он вынесен отдельной карточкой выше). Остальные ключи в YAML (log, database…) сохраняются при сохранении из формы.",
       "fields": [
         {
           "path": ["server", "listen"],
           "label": "listen",
           "type": "string",
           "widget": "textarea",
-          "placeholder": "0.0.0.0@53 или несколько строк",
-          "doc": "Адрес и порт прослушивания. Несколько значений в YAML задаются списком; в форме — по одному адресу на строку."
+          "placeholder": "37.230.115.233@53 — по одному адресу на строку",
+          "doc": "Где Knot принимает DNS (UDP/TCP). Несколько listen — список в YAML, в форме — по строке на адрес. Если не задан KNOT_DNS_PROBE_HOST, dnsadmin для проверки SOA/DS берёт первый не-wildcard адрес отсюда."
         },
         {
           "path": ["server", "identity"],

@@ -5,17 +5,24 @@ from __future__ import annotations
 import ipaddress
 import logging
 import re
+from collections.abc import Mapping
 from typing import Any
 
+from app.knot_editor_model import extract_editor_model
 from app.knot_yaml import parse_knot_conf
 
 logger = logging.getLogger(__name__)
 
 _WILDCARD_ADDRS = frozenset({"0.0.0.0", "::", "*"})
 
+# Если ruamel/структура YAML неожиданна — вытащить явный IPv4@порт с той же строки, что в файле
+_RAW_LISTEN_IPV4 = re.compile(
+    r"(?im)^\s*listen:\s*[\"']?((?:\d{1,3}\.){3}\d{1,3}@[0-9]+)[\"']?\s*(?:#.*)?$",
+)
 
-def _listen_strings(server_block: dict[str, Any] | None) -> list[str]:
-    if not server_block or not isinstance(server_block, dict):
+
+def _listen_strings(server_block: Any) -> list[str]:
+    if server_block is None or not isinstance(server_block, Mapping):
         return []
     ln = server_block.get("listen")
     if ln is None:
@@ -27,7 +34,7 @@ def _listen_strings(server_block: dict[str, Any] | None) -> list[str]:
         for item in ln:
             if isinstance(item, str) and item.strip():
                 out.append(item.strip())
-            elif isinstance(item, dict):
+            elif isinstance(item, Mapping):
                 addr = item.get("address")
                 port = item.get("port")
                 if isinstance(addr, str) and addr.strip():
@@ -52,36 +59,59 @@ def _host_from_listen_entry(entry: str) -> str | None:
     return host
 
 
+def _ip_probe_from_listen_entry(entry: str) -> str | None:
+    """Первый пригодный для UDP-проб IP из одной строки listen (addr@port)."""
+    host_raw = _host_from_listen_entry(entry.strip())
+    if not host_raw:
+        return None
+    host = host_raw.strip("[]")
+    if host in _WILDCARD_ADDRS:
+        return None
+    try:
+        addr = ipaddress.ip_address(host)
+        return str(addr)
+    except ValueError:
+        pass
+    if "." in host and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", host):
+        return host_raw.strip("[]")
+    return None
+
+
+def _fallback_listen_host_from_raw(text: str) -> str | None:
+    m = _RAW_LISTEN_IPV4.search(text or "")
+    if not m:
+        return None
+    return _ip_probe_from_listen_entry(m.group(1).strip())
+
+
 def listen_host_for_dns_probe(knot_conf_text: str) -> str | None:
     """
-    Первый не-wildcard адрес из server.listen, пригодный для UDP-запросов из пода dnsadmin.
+    Первый не-wildcard адрес из server.listen.
 
-    Пропускает 0.0.0.0@53, ::@53; для явного IP (или FQDN в listen) возвращает хост.
-    Имена интерфейсов (eth0@53) не возвращаем — на стороне dnsadmin они обычно бесполезны.
+    ruamel отдаёт server как CommentedMap, не dict — поэтому везде Mapping, не isinstance(..., dict).
     """
+    text = knot_conf_text or ""
     try:
-        root = parse_knot_conf(knot_conf_text or "")
+        root = parse_knot_conf(text)
     except Exception as e:  # noqa: BLE001
         logger.debug("parse knot.conf for listen: %s", e)
-        return None
-    if not isinstance(root, dict):
-        return None
-    server = root.get("server")
-    if not isinstance(server, dict):
-        return None
-    for entry in _listen_strings(server):
-        host_raw = _host_from_listen_entry(entry)
-        if not host_raw:
-            continue
-        host = host_raw.strip("[]")
-        if host in _WILDCARD_ADDRS:
-            continue
-        try:
-            addr = ipaddress.ip_address(host)
-            return str(addr)
-        except ValueError:
-            pass
-        # FQDN в listen (редко) — только если похоже на имя хоста, не на интерфейс
-        if "." in host and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", host):
-            return host_raw.strip("[]")
-    return None
+        return _fallback_listen_host_from_raw(text)
+
+    try:
+        model = extract_editor_model(root)
+        lt = (model.server.get("listen") or "").strip()
+        for line in lt.splitlines():
+            h = _ip_probe_from_listen_entry(line)
+            if h:
+                return h
+    except Exception as e:  # noqa: BLE001
+        logger.debug("listen via extract_editor_model: %s", e)
+
+    if isinstance(root, Mapping):
+        srv = root.get("server")
+        for entry in _listen_strings(srv):
+            h = _ip_probe_from_listen_entry(entry)
+            if h:
+                return h
+
+    return _fallback_listen_host_from_raw(text)

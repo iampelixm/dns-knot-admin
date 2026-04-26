@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import base64
 import datetime as dt
+import json
 import logging
 import os
 import re
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 import jwt
 from fastapi import Depends, FastAPI, HTTPException, status
@@ -16,11 +17,12 @@ from fastapi.responses import FileResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.staticfiles import StaticFiles
 from kubernetes import client, config
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
+from app.axfr_fragment_model import AxfrFragmentModel, parse_axfr_fragment, render_axfr_fragment
 from app.axfr_secret import axfr_diag_public_dict, generate_tsig_yaml_fragment, read_axfr_secret
-from app.dns_probe import knot_probe
-from app.dnssec_ds import fetch_ds_records_for_zone
+from app.dns_probe import knot_probe, query_soa_serial
+from app.dnssec_ds import fetch_ds_records_for_zone, zone_is_ru_family
 from app.knot_conf import list_zone_dnssec_flags, set_zone_dnssec_signing, zone_declared_in_knot_conf
 from app.knot_editor_model import KnotEditorModel, apply_editor_model, extract_editor_model
 from app.knot_validate import knot_conf_needs_axfr, run_knotc_conf_check
@@ -36,6 +38,20 @@ DEFAULT_ZONE = os.environ.get("DEFAULT_ZONE", "k3s.local")
 KNOT_AXFR_SECRET_NAME = os.environ.get("KNOT_AXFR_SECRET_NAME", "knot-axfr")
 KNOT_AXFR_SECRET_KEY = os.environ.get("KNOT_AXFR_SECRET_KEY", "axfr.conf")
 
+def _load_knot_instances() -> List[Dict[str, Any]]:
+    raw = os.environ.get("KNOT_INSTANCES", "").strip()
+    if not raw:
+        return []
+    try:
+        data = json.loads(raw)
+        return data if isinstance(data, list) else []
+    except json.JSONDecodeError:
+        logger.warning("KNOT_INSTANCES: невалидный JSON, мульти-инстанс отключён")
+        return []
+
+
+KNOT_INSTANCES_LIST: List[Dict[str, Any]] = _load_knot_instances()
+
 ADMIN_USERNAME = os.environ.get("ADMIN_USERNAME", "admin")
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "change-me")
 
@@ -49,7 +65,7 @@ STATIC_DIR = Path(os.environ.get("STATIC_DIR", "")).resolve() if os.environ.get(
 
 bearer_scheme = HTTPBearer(auto_error=False)
 
-app = FastAPI(title="dnsadmin", version="0.3.1", docs_url=None, redoc_url=None)
+app = FastAPI(title="dnsadmin", version="0.4.0", docs_url=None, redoc_url=None)
 
 
 def get_clients():
@@ -244,8 +260,19 @@ class KnotConfValidateBody(BaseModel):
     axfr_override: str | None = None
 
 
-class AxfrConfBody(BaseModel):
-    content: str
+class AxfrPutBody(BaseModel):
+    """PUT /api/knot-conf/axfr: либо готовый YAML, либо structured — сервер соберёт YAML."""
+
+    content: str | None = None
+    structured: AxfrFragmentModel | None = None
+
+    @model_validator(mode="after")
+    def _need_payload(self) -> AxfrPutBody:
+        if self.structured is not None:
+            return self
+        if self.content is not None:
+            return self
+        raise ValueError("Укажите content или structured")
 
 
 class TsigGenerateBody(BaseModel):
@@ -490,8 +517,20 @@ def get_axfr_status(_: Dict[str, Any] = Depends(get_current_user)) -> Dict[str, 
     )
 
 
+def _axfr_parse_payload(content: str) -> Dict[str, Any]:
+    structured, warn = parse_axfr_fragment(content)
+    return {
+        "structured": structured.model_dump(mode="json") if structured else None,
+        "structured_parse_warning": warn,
+    }
+
+
+def _axfr_structured_response(content: str) -> Dict[str, Any]:
+    return {"content": content, **_axfr_parse_payload(content)}
+
+
 @app.get("/api/knot-conf/axfr")
-def get_axfr_fragment(_: Dict[str, Any] = Depends(get_current_user)) -> Dict[str, str]:
+def get_axfr_fragment(_: Dict[str, Any] = Depends(get_current_user)) -> Dict[str, Any]:
     core, _ = get_clients()
     st = read_axfr_secret(
         core,
@@ -507,7 +546,7 @@ def get_axfr_fragment(_: Dict[str, Any] = Depends(get_current_user)) -> Dict[str
             secret_key=KNOT_AXFR_SECRET_KEY,
         )
         raise HTTPException(status_code=404, detail=detail)
-    return {"content": st.content}
+    return _axfr_structured_response(st.content)
 
 
 @app.post("/api/knot-conf/axfr/generate-tsig")
@@ -529,12 +568,43 @@ def post_axfr_generate_tsig(
         raise HTTPException(status_code=400, detail=str(e)) from e
     except RuntimeError as e:
         raise HTTPException(status_code=500, detail=str(e)) from e
-    return {"yaml": yaml_text, "key_id": kid}
+    out: Dict[str, Any] = {"yaml": yaml_text, "key_id": kid}
+    parsed, warn = parse_axfr_fragment(yaml_text)
+    if parsed is not None:
+        out["structured"] = parsed.model_dump(mode="json")
+    out["structured_parse_warning"] = warn
+    return out
+
+
+class AxfrContentBody(BaseModel):
+    content: str = ""
+
+
+@app.post("/api/knot-conf/axfr/parse-fragment")
+def post_axfr_parse_fragment(
+    body: AxfrContentBody,
+    _: Dict[str, Any] = Depends(get_current_user),
+) -> Dict[str, Any]:
+    """Разобрать YAML фрагмента (например после правки на вкладке YAML) без чтения Secret."""
+    return _axfr_parse_payload(body.content)
+
+
+@app.post("/api/knot-conf/axfr/render-model")
+def post_axfr_render_model(
+    body: Dict[str, Any],
+    _: Dict[str, Any] = Depends(get_current_user),
+) -> Dict[str, str]:
+    """Собрать YAML фрагмента AXFR из structured (keys/acls) без записи в кластер."""
+    try:
+        model = AxfrFragmentModel.model_validate(body)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=400, detail=f"Некорректная structured-модель: {e}") from e
+    return {"content": render_axfr_fragment(model)}
 
 
 @app.put("/api/knot-conf/axfr")
 def put_axfr_fragment(
-    body: AxfrConfBody,
+    body: AxfrPutBody,
     _: Dict[str, Any] = Depends(get_current_user),
 ) -> Dict[str, Any]:
     core, apps = get_clients()
@@ -573,14 +643,15 @@ def put_axfr_fragment(
         )
     data = _read_knot_conf_map(core)
     knot_conf = data.get("knot.conf") or ""
+    axfr_yaml = render_axfr_fragment(body.structured) if body.structured is not None else (body.content or "")
     try:
-        parse_knot_conf(body.content)
+        parse_knot_conf(axfr_yaml)
     except Exception as e:  # noqa: BLE001
         raise HTTPException(status_code=400, detail=f"YAML axfr не разобран: {e}") from e
     res = run_knotc_conf_check(
         knot_conf,
         _zone_files_from_cm(data),
-        axfr_yaml=body.content,
+        axfr_yaml=axfr_yaml,
     )
     if not res.ok:
         raise HTTPException(
@@ -590,7 +661,7 @@ def put_axfr_fragment(
     sec = core.read_namespaced_secret(KNOT_AXFR_SECRET_NAME, NAMESPACE)
     if sec.data is None:
         sec.data = {}
-    sec.data[KNOT_AXFR_SECRET_KEY] = base64.b64encode(body.content.encode("utf-8")).decode("ascii")
+    sec.data[KNOT_AXFR_SECRET_KEY] = base64.b64encode(axfr_yaml.encode("utf-8")).decode("ascii")
     if sec.string_data is not None:
         sec.string_data = None
     core.replace_namespaced_secret(KNOT_AXFR_SECRET_NAME, NAMESPACE, sec)
@@ -603,6 +674,57 @@ def login(body: LoginBody) -> TokenResponse:
     if body.username != ADMIN_USERNAME or body.password != ADMIN_PASSWORD:
         raise HTTPException(status_code=401, detail="Неверный логин или пароль")
     return TokenResponse(access_token=_issue_token(body.username))
+
+
+@app.get("/api/instances")
+def get_instances(_: Dict[str, Any] = Depends(get_current_user)) -> Dict[str, Any]:
+    """Список сконфигурированных Knot-инстансов (из KNOT_INSTANCES)."""
+    return {"instances": KNOT_INSTANCES_LIST}
+
+
+@app.get("/api/zones/sync-status")
+def get_zones_sync_status(_: Dict[str, Any] = Depends(get_current_user)) -> Dict[str, Any]:
+    """
+    Сверка SOA serial по всем зонам на всех инстансах.
+    Требует KNOT_INSTANCES. Возвращает матрицу зона × сервер с serial и статусом синхронизации.
+    """
+    if not KNOT_INSTANCES_LIST:
+        return {"instances": [], "zones": [], "warning": "KNOT_INSTANCES не настроен — мульти-инстанс отключён"}
+
+    core, _ = get_clients()
+    cm_data = _read_knot_conf_map(core)
+    zone_names = sorted(k[:-5] for k in cm_data if k.endswith(".zone"))
+
+    zones_result = []
+    for zone in zone_names:
+        servers: List[Dict[str, Any]] = []
+        primary_serial: int | None = None
+
+        for inst in KNOT_INSTANCES_LIST:
+            ip = inst.get("ip", "")
+            role = inst.get("role", "unknown")
+            ok, serial, msg = query_soa_serial(ip, zone)
+            if role == "primary" and serial is not None:
+                primary_serial = serial
+            servers.append({
+                "id": inst.get("id"),
+                "label": inst.get("label", inst.get("id")),
+                "ip": ip,
+                "role": role,
+                "ok": ok,
+                "serial": serial,
+                "message": msg if not ok else None,
+            })
+
+        for s in servers:
+            if primary_serial is None or s["serial"] is None:
+                s["synced"] = None
+            else:
+                s["synced"] = s["serial"] >= primary_serial
+
+        zones_result.append({"zone": zone, "servers": servers, "primary_serial": primary_serial})
+
+    return {"instances": KNOT_INSTANCES_LIST, "zones": zones_result}
 
 
 @app.get("/api/zones")
@@ -756,12 +878,17 @@ def get_zone_dnssec_ds(
     host = _knot_dns_reachable_host()
     port = int(os.environ.get("KNOT_DNS_PORT", "53"))
     try:
-        ds_list, msg = fetch_ds_records_for_zone(host, zone_name, port=port)
+        ds_list, dnskey_list, msg = fetch_ds_records_for_zone(host, zone_name, port=port)
     except OSError as e:
         raise HTTPException(status_code=502, detail=str(e)) from e
     if not ds_list:
         raise HTTPException(status_code=404, detail=msg)
-    return {"ds": ds_list, "message": msg}
+    return {
+        "ds": ds_list,
+        "dnskey": dnskey_list,
+        "message": msg,
+        "registrar_ru_family": zone_is_ru_family(zone_name),
+    }
 
 
 def _apply_zone_update(zone_name: str, content: str) -> Dict[str, str]:

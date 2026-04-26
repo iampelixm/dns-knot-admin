@@ -57,6 +57,37 @@ def _response_has_soa(resp: dns.message.Message) -> bool:
     return False
 
 
+def query_soa_serial(
+    host: str,
+    zone: str,
+    port: int = 53,
+    timeout: float = 2.0,
+) -> Tuple[bool, Optional[int], str]:
+    """Запрос SOA serial с конкретного сервера. Возвращает (ok, serial|None, message)."""
+    z = zone.strip().rstrip(".") + "."
+    try:
+        infos = socket.getaddrinfo(host, port, type=socket.SOCK_DGRAM, proto=socket.IPPROTO_UDP)
+    except OSError as e:
+        return False, None, f"Нет адреса для {host!r}: {e}"
+    if not infos:
+        return False, None, f"Нет адреса для {host!r}"
+    ip = infos[0][4][0]
+    msg = dns.message.make_query(z, dns.rdatatype.SOA, want_dnssec=False)
+    try:
+        resp = dns.query.udp(msg, ip, port=port, timeout=timeout)
+    except Exception as e:  # noqa: BLE001
+        return False, None, f"Нет ответа от {ip}: {e}"
+    rc = resp.rcode()
+    if rc != dns.rcode.NOERROR:
+        return False, None, f"RCODE {dns.rcode.to_text(rc)}"
+    for section in (resp.answer, resp.authority):
+        for rrset in section:
+            if rrset.rdtype == dns.rdatatype.SOA:
+                rr = list(rrset)[0]
+                return True, int(rr.serial), f"serial={rr.serial}"
+    return False, None, "SOA отсутствует в ответе"
+
+
 def knot_probe(host: str, zone: str | None = None, port: int | None = None, timeout: float = 2.0) -> Tuple[bool, str, Optional[float]]:
     """SOA по UDP на host (имя или IP). Зона и порт из env, если не переданы."""
     z = (zone or os.environ.get("DNS_HEALTH_PROBE_ZONE") or os.environ.get("DEFAULT_ZONE") or "k3s.local").strip()
