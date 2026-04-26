@@ -72,13 +72,19 @@
           <el-tab-pane label="Записи" name="records">
           <el-card shadow="never">
             <template #header>A / AAAA / MX / TXT / CNAME …</template>
-            <el-table :data="formModel.records" border size="small">
-              <el-table-column label="Имя" width="140">
+            <el-table
+              :data="sortedRecords"
+              :row-class-name="recordRowClassName"
+              border
+              size="small"
+              style="width: 100%"
+            >
+              <el-table-column label="Имя" min-width="200">
                 <template #default="{ row }">
                   <el-input v-model="row.name" placeholder="@" clearable />
                 </template>
               </el-table-column>
-              <el-table-column label="TTL" width="120">
+              <el-table-column label="TTL" width="110">
                 <template #default="{ row }">
                   <el-input-number
                     v-model="row.ttl"
@@ -89,21 +95,26 @@
                   />
                 </template>
               </el-table-column>
-              <el-table-column label="Тип" width="130">
+              <el-table-column label="Тип" width="120">
                 <template #default="{ row }">
                   <el-select v-model="row.rtype" filterable>
                     <el-option v-for="t in recordTypes" :key="t" :label="t" :value="t" />
                   </el-select>
                 </template>
               </el-table-column>
-              <el-table-column label="Значение">
+              <el-table-column label="Значение" min-width="240">
                 <template #default="{ row }">
-                  <el-input v-model="row.value" placeholder="1.2.3.4 или 10 mail.example.com" clearable />
+                  <el-input
+                    v-model="row.value"
+                    type="textarea"
+                    :autosize="{ minRows: 1 }"
+                    placeholder="1.2.3.4 или 10 mail.example.com"
+                  />
                 </template>
               </el-table-column>
               <el-table-column width="90" align="center">
-                <template #default="{ $index }">
-                  <el-button link type="danger" @click="removeRec($index)">Удалить</el-button>
+                <template #default="{ row }">
+                  <el-button link type="danger" @click="removeRec(formModel.records.indexOf(row))">Удалить</el-button>
                 </template>
               </el-table-column>
             </el-table>
@@ -185,11 +196,79 @@
                   </el-button>
                 </div>
                 <div>
-                  <el-button :loading="dsLoading" @click="openDsDialog">Показать DS (SHA-256) для регистратора</el-button>
+                  <el-button :loading="dsLoading" @click="openDsDialog">Показать DS и DNSKEY</el-button>
                 </div>
               </el-space>
             </el-card>
             <el-alert v-else type="info" :closable="false" show-icon title="Выберите зону в списке выше." />
+          </el-tab-pane>
+
+          <el-tab-pane label="Серверы" name="servers">
+            <el-card shadow="never">
+              <template #header>
+                <div style="display:flex;align-items:center;justify-content:space-between">
+                  <span>Состояние зоны на серверах</span>
+                  <el-button size="small" :loading="syncLoading" @click="fetchSyncStatus">Обновить</el-button>
+                </div>
+              </template>
+              <el-alert
+                v-if="syncWarning"
+                type="warning"
+                :closable="false"
+                show-icon
+                :title="syncWarning"
+                style="margin-bottom:12px"
+              />
+              <el-alert
+                v-if="!syncWarning && !selectedZone"
+                type="info"
+                :closable="false"
+                show-icon
+                title="Выберите зону в списке выше."
+              />
+              <template v-if="currentZoneSync">
+                <el-table :data="currentZoneSync.servers" border size="small">
+                  <el-table-column label="Сервер" prop="label" width="160" />
+                  <el-table-column label="IP" prop="ip" width="140" />
+                  <el-table-column label="Роль" width="110">
+                    <template #default="{ row }">
+                      <el-tag
+                        :type="row.role === 'primary' ? 'warning' : 'info'"
+                        size="small"
+                        effect="plain"
+                      >{{ row.role }}</el-tag>
+                    </template>
+                  </el-table-column>
+                  <el-table-column label="SOA Serial" width="140">
+                    <template #default="{ row }">
+                      <span v-if="row.serial !== null" class="mono-small">{{ row.serial }}</span>
+                      <span v-else class="muted">—</span>
+                    </template>
+                  </el-table-column>
+                  <el-table-column label="Синхронизация">
+                    <template #default="{ row }">
+                      <el-tag v-if="!row.ok" type="danger" size="small">
+                        {{ row.message || 'нет ответа' }}
+                      </el-tag>
+                      <el-tag v-else-if="row.role === 'primary'" type="warning" size="small">primary</el-tag>
+                      <el-tag v-else-if="row.synced === true" type="success" size="small">в синхронизации</el-tag>
+                      <el-tag v-else-if="row.synced === false" type="danger" size="small">
+                        отстаёт ({{ currentZoneSync.primary_serial }} → {{ row.serial }})
+                      </el-tag>
+                      <el-tag v-else type="info" size="small">неизвестно</el-tag>
+                    </template>
+                  </el-table-column>
+                </el-table>
+                <p v-if="syncUpdatedAt" class="muted small-p" style="margin-top:8px">
+                  Обновлено: {{ syncUpdatedAt }}
+                </p>
+              </template>
+              <el-empty
+                v-else-if="!syncWarning && !syncLoading && selectedZone"
+                description="Нажмите «Обновить» для проверки"
+                :image-size="60"
+              />
+            </el-card>
           </el-tab-pane>
 
           <el-tab-pane label="Текст зоны" name="text">
@@ -197,13 +276,7 @@
             <el-alert v-if="validateMessage" :type="validateOk ? 'success' : 'error'" :closable="false" show-icon>
               {{ validateMessage }}
             </el-alert>
-            <el-input
-              v-model="content"
-              type="textarea"
-              :rows="22"
-              placeholder="Содержимое zone-файла..."
-              class="mono"
-            />
+            <ZoneTextEditor v-model="content" />
           </el-space>
           </el-tab-pane>
         </el-tabs>
@@ -227,12 +300,48 @@
         </template>
       </el-dialog>
 
-      <el-dialog v-model="dsDialogVisible" title="DS для регистратора" width="640px" @closed="dsDialogText = ''">
-        <el-alert v-if="dsDialogHint" type="warning" :closable="false" show-icon :title="dsDialogHint" class="mb12" />
-        <el-input v-model="dsDialogText" type="textarea" :rows="8" readonly class="mono" />
+      <el-dialog
+        v-model="dsDialogVisible"
+        title="DNSSEC: DS и DNSKEY"
+        width="720px"
+        @closed="resetDsDialog"
+      >
+        <el-alert v-if="dsDialogHint" type="info" :closable="false" show-icon :title="dsDialogHint" class="mb12" />
+        <el-alert
+          v-if="dsDialogRuFamily"
+          type="warning"
+          :closable="false"
+          show-icon
+          class="mb12"
+          title="Зона .RU / .РФ / .SU: по правилам многих регистраторов передайте и DNSKEY, и DS (оба блока ниже). Имя в записях — с точкой в конце (example.ru.)."
+        />
+        <el-alert
+          v-else
+          type="success"
+          :closable="false"
+          show-icon
+          class="mb12"
+          title="Для большинства международных доменов достаточно DS (SHA-256). DNSKEY уже публикуются на ваших NS. Строки ниже — полные RR с точкой в конце имени."
+        />
+        <el-tabs v-model="dsDialogTab" class="ds-tabs">
+          <el-tab-pane label="DS для регистратора" name="ds">
+            <p class="muted small-p">Вставьте в панели родительской зоны / регистратора.</p>
+            <el-input v-model="dsDialogText" type="textarea" :rows="6" readonly class="mono" />
+          </el-tab-pane>
+          <el-tab-pane label="DNSKEY (с сервера)" name="dnskey">
+            <p class="muted small-p">
+              Тот же ответ DNSKEY, из которого считается DS. Для публикации у родителя не нужен — только для
+              проверки, бэкапа или документации.
+            </p>
+            <el-input v-model="dsDialogDnskeyText" type="textarea" :rows="10" readonly class="mono" />
+          </el-tab-pane>
+        </el-tabs>
         <template #footer>
           <el-button @click="dsDialogVisible = false">Закрыть</el-button>
-          <el-button type="primary" :disabled="!dsDialogText" @click="copyDsToClipboard">Копировать</el-button>
+          <el-button :disabled="!dsDialogText" @click="copyDsToClipboard">Копировать DS</el-button>
+          <el-button type="primary" :disabled="!dsDialogDnskeyText" @click="copyDnskeyToClipboard">
+            Копировать DNSKEY
+          </el-button>
         </template>
       </el-dialog>
     </el-main>
@@ -240,9 +349,10 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, reactive, ref, toRaw } from "vue";
+import { computed, onMounted, onUnmounted, reactive, ref, toRaw, watch } from "vue";
 import { useRouter } from "vue-router";
 import { ElMessage } from "element-plus";
+import ZoneTextEditor from "../components/ZoneTextEditor.vue";
 import {
   api,
   AUTH_TOKEN_KEY,
@@ -251,6 +361,8 @@ import {
   type DnssecDsResponse,
   type ZoneFormModel,
   type ZoneSummary,
+  type ZoneSyncEntry,
+  type ZonesSyncStatusResponse,
   type ZonesResponse,
   type ZoneResponse,
   type ValidateResponse,
@@ -269,7 +381,7 @@ const newZoneName = ref("");
 const newZoneContent = ref("");
 const creating = ref(false);
 
-const activeTab = ref<"records" | "soa" | "ns" | "dnssec" | "text">("records");
+const activeTab = ref<"records" | "soa" | "ns" | "dnssec" | "servers" | "text">("records");
 const formModel = reactive<ZoneFormModel>(emptyZoneForm());
 const formLoading = ref(false);
 const formSaving = ref(false);
@@ -289,10 +401,35 @@ const dnssecServer = ref(false);
 const dnssecSaving = ref(false);
 const dnssecDirty = computed(() => dnssecLocal.value !== dnssecServer.value);
 
+const syncLoading = ref(false);
+const syncZones = ref<ZoneSyncEntry[]>([]);
+const syncWarning = ref("");
+const syncUpdatedAt = ref("");
+const currentZoneSync = computed<ZoneSyncEntry | null>(
+  () => syncZones.value.find((z) => z.zone === selectedZone.value) ?? null,
+);
+
 const dsLoading = ref(false);
 const dsDialogVisible = ref(false);
 const dsDialogText = ref("");
+const dsDialogDnskeyText = ref("");
+const dsDialogTab = ref<"ds" | "dnskey">("ds");
+const dsDialogRuFamily = ref(false);
 const dsDialogHint = ref("");
+
+async function fetchSyncStatus() {
+  syncLoading.value = true;
+  try {
+    const { data } = await api.get<ZonesSyncStatusResponse>("/api/zones/sync-status");
+    syncZones.value = data.zones;
+    syncWarning.value = data.warning ?? "";
+    syncUpdatedAt.value = new Date().toLocaleTimeString();
+  } catch (e) {
+    syncWarning.value = messageFromAxios(e, "Не удалось получить статус синхронизации");
+  } finally {
+    syncLoading.value = false;
+  }
+}
 
 function syncDnssecFromServer() {
   const s = zoneSummaries.value.find((z) => z.name === selectedZone.value);
@@ -318,6 +455,13 @@ async function applyDnssec() {
   }
 }
 
+function resetDsDialog() {
+  dsDialogText.value = "";
+  dsDialogDnskeyText.value = "";
+  dsDialogTab.value = "ds";
+  dsDialogRuFamily.value = false;
+}
+
 async function openDsDialog() {
   if (!selectedZone.value) return;
   dsLoading.value = true;
@@ -327,7 +471,9 @@ async function openDsDialog() {
       `/api/zones/${encodeURIComponent(selectedZone.value)}/dnssec-ds`,
     );
     dsDialogText.value = data.ds.join("\n");
+    dsDialogDnskeyText.value = (data.dnskey || []).join("\n");
     dsDialogHint.value = data.message || "";
+    dsDialogRuFamily.value = Boolean(data.registrar_ru_family);
     dsDialogVisible.value = true;
   } catch (e) {
     ElMessage.warning(messageFromAxios(e, "DS недоступны (подпись выключена или DNSKEY ещё не в эфире)"));
@@ -339,13 +485,61 @@ async function openDsDialog() {
 async function copyDsToClipboard() {
   try {
     await navigator.clipboard.writeText(dsDialogText.value);
-    ElMessage.success("Скопировано в буфер");
+    ElMessage.success("DS скопированы");
+  } catch {
+    ElMessage.error("Не удалось скопировать");
+  }
+}
+
+async function copyDnskeyToClipboard() {
+  try {
+    await navigator.clipboard.writeText(dsDialogDnskeyText.value);
+    ElMessage.success("DNSKEY скопированы");
   } catch {
     ElMessage.error("Не удалось скопировать");
   }
 }
 
 const recordTypes = ["A", "AAAA", "MX", "TXT", "CNAME", "PTR", "SRV", "NS"];
+
+// Reversed DNS labels key for hierarchical sort: "a.n" → "n\0a", "n" → "n"
+function dnsNameSortKey(name: string): string {
+  if (!name || name === "@") return "\x00";
+  return name.split(".").reverse().join("\x00");
+}
+
+// Group key = last label of the name (or "@")
+function dnsGroupKey(name: string): string {
+  if (!name || name === "@") return "@";
+  const parts = name.split(".");
+  return parts[parts.length - 1]!;
+}
+
+const sortedRecords = computed(() =>
+  [...formModel.records].sort((a, b) => {
+    const ka = dnsNameSortKey(a.name || "@");
+    const kb = dnsNameSortKey(b.name || "@");
+    if (ka !== kb) return ka < kb ? -1 : 1;
+    return (a.rtype || "").localeCompare(b.rtype || "");
+  }),
+);
+
+const groupStartSet = computed(() => {
+  const set = new Set<number>();
+  let lastGroup = "";
+  sortedRecords.value.forEach((row, i) => {
+    const g = dnsGroupKey(row.name || "@");
+    if (g !== lastGroup) {
+      set.add(i);
+      lastGroup = g;
+    }
+  });
+  return set;
+});
+
+function recordRowClassName({ rowIndex }: { rowIndex: number }): string {
+  return groupStartSet.value.has(rowIndex) && rowIndex > 0 ? "rec-group-start" : "";
+}
 
 function messageFromAxios(err: unknown, fallback: string): string {
   const d = (err as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail;
@@ -620,6 +814,12 @@ function removeRec(i: number) {
   formModel.records.splice(i, 1);
 }
 
+watch(activeTab, (tab) => {
+  if (tab === "servers" && !syncZones.value.length && !syncWarning.value) {
+    fetchSyncStatus();
+  }
+});
+
 onMounted(async () => {
   try {
     await loadZones();
@@ -730,6 +930,17 @@ onUnmounted(() => {
 .dnssec-label {
   font-size: 14px;
 }
+.small-p {
+  margin: 0 0 8px;
+  font-size: 13px;
+}
+.mono-small {
+  font-family: monospace;
+  font-size: 13px;
+}
+.ds-tabs {
+  margin-top: 4px;
+}
 .zone-editor {
   width: 100%;
 }
@@ -747,5 +958,11 @@ onUnmounted(() => {
 }
 .mb12 {
   margin-bottom: 12px;
+}
+:deep(.rec-group-start td) {
+  border-top: 2px solid var(--el-border-color-darker) !important;
+}
+:deep(.el-textarea__inner) {
+  word-break: break-all;
 }
 </style>
