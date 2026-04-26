@@ -7,15 +7,34 @@ CONFIG_FILE="$ROOT_DIR/build.local.conf"
 
 # ── Конфигурация ──────────────────────────────────────────────────────────────
 
+_check_registry_login() {
+  local reg="$1" user="$2" pass="$3"
+  local host
+  host="$(echo "$reg" | cut -d'/' -f1)"
+  echo "$pass" | docker login "$host" -u "$user" --password-stdin > /dev/null 2>&1
+}
+
 if [[ ! -f "$CONFIG_FILE" ]]; then
   echo "Файл конфигурации не найден: $CONFIG_FILE"
   echo "Создаём конфигурацию (сохранится в $CONFIG_FILE, в git не попадёт)."
   echo ""
 
-  read -rp  "Registry (например registry.example.com/dns-knot): " _reg
-  read -rp  "Логин в registry: " _user
-  read -rsp "Пароль в registry: " _pass
-  echo ""
+  read -rp "Registry (например registry.example.com/dns-knot): " _reg
+
+  while true; do
+    read -rp  "Логин в registry: " _user
+    read -rsp "Пароль в registry: " _pass
+    echo ""
+
+    echo -n "Проверка учётных данных... "
+    if _check_registry_login "$_reg" "$_user" "$_pass"; then
+      docker logout "$(echo "$_reg" | cut -d'/' -f1)" > /dev/null 2>&1 || true
+      echo "OK"
+      break
+    else
+      echo "Ошибка: не удалось войти в registry. Проверьте логин и пароль."
+    fi
+  done
 
   cat > "$CONFIG_FILE" <<EOF
 REGISTRY=$_reg
