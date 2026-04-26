@@ -56,12 +56,41 @@
             <el-button @click="validateCurrent('form')" :loading="validateLoading">Проверить (YAML + knotc)</el-button>
             <el-button type="success" @click="saveModel" :loading="saveModelLoading">Сохранить и перезапустить Knot</el-button>
           </div>
+
+          <el-card v-if="listenFieldMeta" shadow="never" class="mb12 listen-card">
+            <template #header>Прослушивание DNS — server.listen</template>
+            <p class="section-doc">
+              Здесь задаётся, на каких <strong>IP (или интерфейс@порт)</strong> Knot принимает запросы. Без этого
+              сервис не обслуживает зоны. После «Сохранить» Knot перезапускается. Индикатор
+              <span class="muted">Knot</span> в шапке шлёт SOA на первый не-wildcard адрес отсюда (если не задан
+              <code>KNOT_DNS_PROBE_HOST</code> в Deployment dnsadmin).
+            </p>
+            <div class="listen-field-head">
+              <span class="listen-label">Адрес@порт</span>
+              <el-tooltip
+                v-if="listenFieldMeta.doc"
+                :content="listenFieldMeta.doc"
+                placement="top"
+                :show-after="400"
+              >
+                <el-icon class="help-ico"><QuestionFilled /></el-icon>
+              </el-tooltip>
+            </div>
+            <el-input
+              v-model="formModel.server.listen"
+              type="textarea"
+              :rows="4"
+              class="mono listen-input"
+              :placeholder="listenFieldMeta.placeholder || '37.230.115.233@53'"
+            />
+          </el-card>
+
           <el-card v-if="serverSection" shadow="never" class="mb12">
             <template #header>{{ serverSection.title }}</template>
             <p v-if="serverSection.doc" class="section-doc">{{ serverSection.doc }}</p>
             <el-form label-width="160px" label-position="left">
               <el-form-item
-                v-for="f in serverSection.fields || []"
+                v-for="f in serverFieldsWithoutListen"
                 :key="f.path.join('.')"
                 :label="f.label"
               >
@@ -132,7 +161,21 @@
                 </template>
                 <template #default="{ row }">
                   <el-select
-                    v-if="col.type === 'enum' && col.enum"
+                    v-if="isZoneAclColumn(col)"
+                    v-model="row.acl"
+                    multiple
+                    filterable
+                    allow-create
+                    default-first-option
+                    collapse-tags
+                    collapse-tags-tooltip
+                    placeholder="id ACL"
+                    style="width: 100%"
+                  >
+                    <el-option v-for="id in axfrAclIds" :key="id" :label="id" :value="id" />
+                  </el-select>
+                  <el-select
+                    v-else-if="col.type === 'enum' && col.enum"
                     v-model="row[zoneFieldProp(col)]"
                     style="width: 100%"
                   >
@@ -196,7 +239,104 @@
           <p v-if="axfrStatus?.code === 'not_found'" class="muted mb12">
             Пока Secret нет: сгенерируйте TSIG, вставьте YAML ниже, создайте Secret в кластере (`kubectl create secret generic … --from-file=…`), затем сохраните из UI.
           </p>
-          <el-input v-model="axfrContent" type="textarea" :rows="22" class="mono" placeholder="key: / acl:" />
+          <el-alert type="info" show-icon :closable="false" class="mb12 axfr-form-hint" title="Форма и YAML">
+            <p class="note-p">
+              Редактор формы поддерживает только блоки <code>key:</code> и <code>acl:</code>. Сохранение из формы пересобирает YAML
+              (комментарии и прочие ключи в фрагменте могут пропасть — используйте вкладку YAML для полного контроля).
+            </p>
+          </el-alert>
+          <el-tabs v-model="axfrSubTab" type="card" class="axfr-inner-tabs mb12">
+            <el-tab-pane label="Форма" name="form">
+              <el-alert
+                v-if="axfrParseWarning"
+                type="warning"
+                show-icon
+                :closable="false"
+                :title="axfrParseWarning"
+                class="mb12"
+              />
+              <div class="form-actions mb12">
+                <el-button size="small" @click="addAxfrKey">Добавить ключ TSIG</el-button>
+                <el-button size="small" @click="addAxfrAcl">Добавить ACL</el-button>
+                <el-button size="small" @click="syncAxfrYamlFromForm" :loading="axfrRenderLoading">Обновить YAML из формы</el-button>
+              </div>
+              <el-card shadow="never" class="mb12">
+                <template #header>TSIG — key:</template>
+                <el-table :data="axfrStructured.keys" border size="small" empty-text="Нет ключей">
+                  <el-table-column prop="id" label="id" min-width="120">
+                    <template #default="{ row }">
+                      <el-input v-model="row.id" class="mono" placeholder="axfr-secondary" />
+                    </template>
+                  </el-table-column>
+                  <el-table-column prop="algorithm" label="algorithm" min-width="140">
+                    <template #default="{ row }">
+                      <el-select v-model="row.algorithm" style="width: 100%">
+                        <el-option v-for="a in tsigAlgorithms" :key="a" :label="a" :value="a" />
+                      </el-select>
+                    </template>
+                  </el-table-column>
+                  <el-table-column prop="secret" label="secret" min-width="180">
+                    <template #default="{ row }">
+                      <el-input v-model="row.secret" type="password" show-password class="mono" placeholder="секрет ключа" />
+                    </template>
+                  </el-table-column>
+                  <el-table-column label="" width="72" align="center">
+                    <template #default="{ $index }">
+                      <el-button type="danger" link size="small" @click="removeAxfrKey($index)">Удалить</el-button>
+                    </template>
+                  </el-table-column>
+                </el-table>
+              </el-card>
+              <el-card shadow="never" class="mb12">
+                <template #header>ACL — acl:</template>
+                <el-table :data="axfrStructured.acls" border size="small" empty-text="Нет ACL">
+                  <el-table-column prop="id" label="id" min-width="120">
+                    <template #default="{ row }">
+                      <el-input v-model="row.id" class="mono" placeholder="axfr-allowed" />
+                    </template>
+                  </el-table-column>
+                  <el-table-column prop="action" label="action" width="120">
+                    <template #default="{ row }">
+                      <el-select v-model="row.action" style="width: 100%">
+                        <el-option label="transfer" value="transfer" />
+                        <el-option label="notify" value="notify" />
+                      </el-select>
+                    </template>
+                  </el-table-column>
+                  <el-table-column prop="address" label="address" min-width="220">
+                    <template #default="{ row }">
+                      <el-select
+                        v-model="row.address"
+                        multiple
+                        filterable
+                        allow-create
+                        default-first-option
+                        collapse-tags
+                        collapse-tags-tooltip
+                        placeholder="IP или CIDR"
+                        style="width: 100%"
+                      />
+                    </template>
+                  </el-table-column>
+                  <el-table-column prop="key" label="key (TSIG)" min-width="140">
+                    <template #default="{ row }">
+                      <el-select v-model="row.key" clearable filterable placeholder="—" style="width: 100%">
+                        <el-option v-for="k in axfrKeysWithId" :key="k.id" :label="k.id" :value="k.id" />
+                      </el-select>
+                    </template>
+                  </el-table-column>
+                  <el-table-column label="" width="72" align="center">
+                    <template #default="{ $index }">
+                      <el-button type="danger" link size="small" @click="removeAxfrAcl($index)">Удалить</el-button>
+                    </template>
+                  </el-table-column>
+                </el-table>
+              </el-card>
+            </el-tab-pane>
+            <el-tab-pane label="YAML" name="yaml">
+              <el-input v-model="axfrContent" type="textarea" :rows="22" class="mono" placeholder="key: / acl:" />
+            </el-tab-pane>
+          </el-tabs>
         </el-tab-pane>
       </el-tabs>
 
@@ -223,12 +363,16 @@
 <script setup lang="ts">
 import { QuestionFilled } from "@element-plus/icons-vue";
 import { ElMessage } from "element-plus";
-import { computed, onMounted, reactive, ref } from "vue";
+import { computed, onMounted, reactive, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import {
   api,
   AUTH_TOKEN_KEY,
   type AxfrClusterDiag,
+  type AxfrGetResponse,
+  type AxfrParseFragmentResponse,
+  type AxfrStructured,
+  type AxfrTsigGenerateResponse,
   type DnsHealthResponse,
   type KnotConfGetResponse,
   type KnotConfModel,
@@ -252,13 +396,17 @@ const schema = ref<KnotSchemaResponse | null>(null);
 const validateResult = ref<KnotConfValidateResponse | null>(null);
 
 const formModel = reactive<KnotConfModel>({
-  server: {},
+  server: { listen: "" },
   include: "",
   zone: [],
   form_parse_warning: null,
 });
 
 const axfrContent = ref("");
+const axfrSubTab = ref<"form" | "yaml">("form");
+const axfrStructured = ref<AxfrStructured>({ keys: [], acls: [] });
+const axfrParseWarning = ref<string | null>(null);
+const axfrRenderLoading = ref(false);
 const axfrAvailable = ref(true);
 const axfrLoading = ref(false);
 const axfrSaving = ref(false);
@@ -267,7 +415,23 @@ const axfrStatus = ref<AxfrClusterDiag | null>(null);
 const axfrStatusLoading = ref(false);
 const tsigGenLoading = ref(false);
 
+const tsigAlgorithms = ["hmac-sha256", "hmac-sha512", "hmac-sha384"] as const;
+
+const axfrAclIds = computed(() => {
+  const ids = (axfrStructured.value.acls || []).map((a) => String(a.id || "").trim()).filter(Boolean);
+  return [...new Set(ids)];
+});
+
+const axfrKeysWithId = computed(() => axfrStructured.value.keys.filter((k) => String(k.id || "").trim()));
+
 const serverSection = computed(() => schema.value?.sections.find((s) => s.id === "server") ?? null);
+/** listen показываем отдельной карточкой, здесь — только identity / nsid / automatic-acl */
+const serverFieldsWithoutListen = computed(
+  () => (serverSection.value?.fields || []).filter((f) => fieldKey(f) !== "listen"),
+);
+const listenFieldMeta = computed(() =>
+  (serverSection.value?.fields || []).find((f) => fieldKey(f) === "listen"),
+);
 const includeSection = computed(() => schema.value?.sections.find((s) => s.id === "include") ?? null);
 const zoneSection = computed(() => schema.value?.sections.find((s) => s.id === "zone") ?? null);
 const secretsNote = computed(() => schema.value?.secrets_note ?? null);
@@ -291,6 +455,86 @@ function zoneFieldProp(f: KnotSchemaField): keyof KnotConfModel["zone"][0] {
   const k = f.path[0];
   if (k === "dnssec-signing") return "dnssec-signing";
   return k as keyof KnotConfModel["zone"][0];
+}
+
+function isZoneAclColumn(f: KnotSchemaField): boolean {
+  return f.path[0] === "acl";
+}
+
+function cloneAxfrStructured(s: AxfrStructured): AxfrStructured {
+  return {
+    keys: (s.keys || []).map((k) => ({
+      id: k.id ?? "",
+      algorithm: k.algorithm || "hmac-sha256",
+      secret: k.secret ?? "",
+      storage: k.storage ?? null,
+      file: k.file ?? null,
+    })),
+    acls: (s.acls || []).map((a) => ({
+      id: a.id ?? "",
+      action: a.action || "transfer",
+      address: [...(a.address || [])],
+      key: a.key ?? null,
+    })),
+  };
+}
+
+async function refreshAxfrStructuredFromYamlString(content: string) {
+  try {
+    const { data } = await api.post<AxfrParseFragmentResponse>("/api/knot-conf/axfr/parse-fragment", {
+      content,
+    });
+    if (data.structured) {
+      axfrStructured.value = cloneAxfrStructured(data.structured);
+    } else {
+      axfrStructured.value = { keys: [], acls: [] };
+    }
+    axfrParseWarning.value = data.structured_parse_warning ?? null;
+  } catch {
+    axfrStructured.value = { keys: [], acls: [] };
+    axfrParseWarning.value = "Не удалось разобрать YAML";
+  }
+}
+
+function addAxfrKey() {
+  axfrStructured.value.keys.push({
+    id: "",
+    algorithm: "hmac-sha256",
+    secret: "",
+  });
+}
+
+function removeAxfrKey(i: number) {
+  axfrStructured.value.keys.splice(i, 1);
+}
+
+function addAxfrAcl() {
+  axfrStructured.value.acls.push({
+    id: "",
+    action: "transfer",
+    address: [],
+    key: null,
+  });
+}
+
+function removeAxfrAcl(i: number) {
+  axfrStructured.value.acls.splice(i, 1);
+}
+
+async function syncAxfrYamlFromForm() {
+  axfrRenderLoading.value = true;
+  try {
+    const { data } = await api.post<{ content: string }>("/api/knot-conf/axfr/render-model", {
+      keys: axfrStructured.value.keys,
+      acls: axfrStructured.value.acls,
+    });
+    axfrContent.value = data.content;
+    axfrParseWarning.value = null;
+  } catch (e) {
+    ElMessage.error(messageFromAxios(e, "Не удалось собрать YAML из формы"));
+  } finally {
+    axfrRenderLoading.value = false;
+  }
 }
 
 function messageFromAxios(err: unknown, fallback: string): string {
@@ -319,15 +563,35 @@ function emptyZoneRow(): KnotConfModel["zone"][0] {
     file: "",
     master: "",
     notify: "",
-    acl: "",
+    acl: [],
     "dnssec-signing": "off",
   };
 }
 
+function normalizeZoneAcl(z: KnotConfModel["zone"][0]): KnotConfModel["zone"][0] {
+  let acl = z.acl as unknown;
+  if (typeof acl === "string") {
+    acl = acl
+      .split(/[\n,]+/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+  } else if (!Array.isArray(acl)) {
+    acl = [];
+  }
+  return { ...z, acl: [...(acl as string[])] };
+}
+
 function assignFormModel(m: KnotConfModel) {
   formModel.server = { ...(m.server || {}) };
+  if (formModel.server.listen === undefined || formModel.server.listen === null) {
+    formModel.server.listen = "";
+  }
   formModel.include = m.include || "";
-  formModel.zone.splice(0, formModel.zone.length, ...(m.zone?.length ? m.zone : []).map((z) => ({ ...z })));
+  formModel.zone.splice(
+    0,
+    formModel.zone.length,
+    ...(m.zone?.length ? m.zone : []).map((z) => normalizeZoneAcl({ ...z })),
+  );
   formModel.form_parse_warning = m.form_parse_warning ?? null;
   if (!formModel.zone.length) formModel.zone.push(emptyZoneRow());
 }
@@ -414,13 +678,21 @@ async function loadAxfrStatus() {
 async function loadAxfr() {
   axfrLoading.value = true;
   try {
-    const { data } = await api.get<{ content: string }>("/api/knot-conf/axfr");
+    const { data } = await api.get<AxfrGetResponse>("/api/knot-conf/axfr");
     axfrContent.value = data.content;
+    if (data.structured) {
+      axfrStructured.value = cloneAxfrStructured(data.structured);
+      axfrParseWarning.value = data.structured_parse_warning ?? null;
+    } else {
+      await refreshAxfrStructuredFromYamlString(data.content);
+    }
     axfrAvailable.value = true;
     await loadAxfrStatus();
   } catch (e) {
     axfrAvailable.value = false;
     axfrContent.value = "";
+    axfrStructured.value = { keys: [], acls: [] };
+    axfrParseWarning.value = null;
     const det = (e as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail;
     if (det && typeof det === "object" && det !== null && "hints" in det) {
       axfrStatus.value = det as AxfrClusterDiag;
@@ -435,10 +707,19 @@ async function loadAxfr() {
 async function generateTsig() {
   tsigGenLoading.value = true;
   try {
-    const { data } = await api.post<{ yaml: string; key_id: string }>("/api/knot-conf/axfr/generate-tsig", {
+    const { data } = await api.post<AxfrTsigGenerateResponse>("/api/knot-conf/axfr/generate-tsig", {
       with_acl: true,
     });
     axfrContent.value = data.yaml;
+    if (data.structured) {
+      axfrStructured.value = cloneAxfrStructured(data.structured);
+    } else {
+      await refreshAxfrStructuredFromYamlString(data.yaml);
+    }
+    if (data.structured_parse_warning) {
+      axfrParseWarning.value = data.structured_parse_warning;
+    }
+    axfrSubTab.value = "form";
     ElMessage.success(
       `Сгенерирован TSIG «${data.key_id}». Проверьте ACL (адреса вторичек), затем сохраните или создайте Secret в кластере.`,
     );
@@ -484,6 +765,9 @@ function toRawForm(): KnotConfModel {
 }
 
 async function validateAxfrFragment() {
+  if (axfrSubTab.value === "form") {
+    await syncAxfrYamlFromForm();
+  }
   axfrValidateLoading.value = true;
   validateResult.value = null;
   try {
@@ -540,6 +824,9 @@ async function saveModel() {
 async function saveAxfr() {
   axfrSaving.value = true;
   try {
+    if (axfrSubTab.value === "form") {
+      await syncAxfrYamlFromForm();
+    }
     await api.put("/api/knot-conf/axfr", { content: axfrContent.value });
     ElMessage.success("Secret обновлён, Knot перезапускается");
   } catch (e) {
@@ -548,6 +835,12 @@ async function saveAxfr() {
     axfrSaving.value = false;
   }
 }
+
+watch(axfrSubTab, async (tab, prev) => {
+  if (tab === "form" && prev === "yaml") {
+    await refreshAxfrStructuredFromYamlString(axfrContent.value);
+  }
+});
 
 function addZone() {
   formModel.zone.push(emptyZoneRow());
@@ -618,6 +911,23 @@ onMounted(async () => {
 }
 .probe-src {
   opacity: 0.82;
+}
+.listen-card .section-doc code {
+  font-size: 12px;
+}
+.listen-input {
+  max-width: 720px;
+  width: 100%;
+}
+.listen-field-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.listen-label {
+  font-weight: 600;
+  font-size: 14px;
 }
 .muted {
   color: var(--el-text-color-secondary);

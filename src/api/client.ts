@@ -25,7 +25,14 @@ export type DnssecPatchResponse = {
   dnssec_signing: boolean;
 };
 
-export type DnssecDsResponse = { ds: string[]; message: string };
+export type DnssecDsResponse = {
+  ds: string[];
+  /** RR DNSKEY с авторитативного сервера (KSK+ZSK), строки в виде zone-файла */
+  dnskey?: string[];
+  message: string;
+  /** .RU / .РФ / .SU — регистраторы часто требуют и DNSKEY, и DS */
+  registrar_ru_family?: boolean;
+};
 export type ZoneResponse = { zone: string; content: string };
 export type ValidateResponse = { valid: boolean; errors: string[] };
 export type DnsHealthResponse = {
@@ -153,6 +160,76 @@ export type KnotSchemaResponse = {
   secrets_note?: { title: string; doc: string; doc_url?: string };
 };
 
+export type AxfrKeyRow = {
+  id: string;
+  algorithm: string;
+  secret: string;
+  storage?: string | null;
+  file?: string | null;
+};
+
+export type AxfrAclRow = {
+  id: string;
+  action: string;
+  address: string[];
+  key?: string | null;
+};
+
+export type AxfrStructured = {
+  keys: AxfrKeyRow[];
+  acls: AxfrAclRow[];
+};
+
+export type AxfrGetResponse = {
+  content: string;
+  structured: AxfrStructured | null;
+  structured_parse_warning?: string | null;
+};
+
+export type AxfrParseFragmentResponse = {
+  structured: AxfrStructured | null;
+  structured_parse_warning?: string | null;
+};
+
+export type AxfrTsigGenerateResponse = {
+  yaml: string;
+  key_id: string;
+  structured?: AxfrStructured | null;
+  structured_parse_warning?: string | null;
+};
+
+export type KnotInstance = {
+  id: string;
+  label: string;
+  ip: string;
+  role: "primary" | "secondary" | string;
+  configmap?: string;
+  deployment?: string;
+};
+
+export type ZoneServerStatus = {
+  id: string;
+  label: string;
+  ip: string;
+  role: string;
+  ok: boolean;
+  serial: number | null;
+  synced: boolean | null;
+  message: string | null;
+};
+
+export type ZoneSyncEntry = {
+  zone: string;
+  servers: ZoneServerStatus[];
+  primary_serial: number | null;
+};
+
+export type ZonesSyncStatusResponse = {
+  instances: KnotInstance[];
+  zones: ZoneSyncEntry[];
+  warning?: string;
+};
+
 export type KnotConfModel = {
   server: Record<string, string>;
   include: string;
@@ -161,7 +238,7 @@ export type KnotConfModel = {
     file: string;
     master: string;
     notify: string;
-    acl: string;
+    acl: string[];
     "dnssec-signing": string;
   }>;
   form_parse_warning?: string | null;
