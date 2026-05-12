@@ -243,3 +243,81 @@ export type KnotConfModel = {
   }>;
   form_parse_warning?: string | null;
 };
+
+export async function fetchZones(): Promise<ZonesResponse> {
+  const { data } = await api.get<ZonesResponse>("/api/zones");
+  return data;
+}
+
+export type FqdnRecord = { fqdn: string; rtype: string };
+export type ZoneFqdnsResponse = { records: FqdnRecord[] };
+
+export async function fetchZoneFqdns(zone: string): Promise<ZoneFqdnsResponse> {
+  const { data } = await api.get<ZoneFqdnsResponse>(`/api/zones/${encodeURIComponent(zone)}/fqdns`);
+  return data;
+}
+
+// --- Ingress Wizard ---
+
+export type NamespacesResponse = { namespaces: string[] };
+
+export type ServicePortInfo = { name: string | null; port: number; protocol: string };
+export type ServiceInfo = { name: string; ports: ServicePortInfo[] };
+export type ServicesResponse = { services: ServiceInfo[] };
+
+export type IngressPath = {
+  path: string;
+  path_type: "Prefix" | "Exact" | "ImplementationSpecific";
+  service_name: string;
+  service_port: number;
+};
+
+export type IngressRule = { host: string; paths: IngressPath[] };
+
+export type IngressTls = { secret_name: string; hosts: string[] };
+
+export type IngressRenderRequest = {
+  name: string;
+  namespace: string;
+  ingress_class: string;
+  rules: IngressRule[];
+  tls: IngressTls | null;
+  annotations: Record<string, string>;
+};
+
+export type IngressRenderResponse = { yaml: string };
+
+export async function fetchNamespaces(): Promise<NamespacesResponse> {
+  const { data } = await api.get<NamespacesResponse>("/api/k8s/namespaces");
+  return data;
+}
+
+export async function fetchServices(namespace: string): Promise<ServicesResponse> {
+  const { data } = await api.get<ServicesResponse>("/api/k8s/services", { params: { namespace } });
+  return data;
+}
+
+export async function renderIngress(body: IngressRenderRequest): Promise<IngressRenderResponse> {
+  const { data } = await api.post<IngressRenderResponse>("/api/k8s/ingress/render", body);
+  return data;
+}
+
+export type IngressItem = {
+  name: string;
+  namespace: string;
+  ingress_class: string | null;
+  hosts: string[];
+  rules: IngressRule[];
+  tls: IngressTls | null;
+  annotations: Record<string, string>;
+  age: string;
+};
+
+export type IngressListResponse = { ingresses: IngressItem[] };
+
+export async function fetchIngresses(namespace?: string): Promise<IngressListResponse> {
+  const { data } = await api.get<IngressListResponse>("/api/k8s/ingresses", {
+    params: namespace ? { namespace } : {},
+  });
+  return data;
+}

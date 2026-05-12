@@ -9,16 +9,18 @@ import logging
 import os
 import re
 import subprocess
+from io import StringIO
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import jwt
-from fastapi import Depends, FastAPI, HTTPException, status
+from fastapi import Depends, FastAPI, HTTPException, Query, status
 from fastapi.responses import FileResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.staticfiles import StaticFiles
 from kubernetes import client, config
 from pydantic import BaseModel, Field, model_validator
+from ruamel.yaml import YAML as _YAML
 
 from app.axfr_fragment_model import AxfrFragmentModel, parse_axfr_fragment, render_axfr_fragment
 from app.axfr_secret import axfr_diag_public_dict, generate_tsig_yaml_fragment, read_axfr_secret
@@ -74,8 +76,20 @@ def get_clients():
     return client.CoreV1Api(), client.AppsV1Api()
 
 
-def _read_knot_conf_map(core: client.CoreV1Api) -> Dict[str, str]:
-    cm = core.read_namespaced_config_map(CONFIGMAP_NAME, NAMESPACE)
+def _resolve_instance(instance_id: str | None) -> tuple[str, str]:
+    """Return (configmap_name, deployment_name) for the given instance_id."""
+    if not instance_id:
+        return CONFIGMAP_NAME, KNOT_DEPLOYMENT
+    for inst in KNOT_INSTANCES_LIST:
+        if inst.get("id") == instance_id:
+            cm = inst.get("configmap") or CONFIGMAP_NAME
+            dep = inst.get("deployment") or KNOT_DEPLOYMENT
+            return cm, dep
+    raise HTTPException(status_code=404, detail=f"Инстанс '{instance_id}' не найден")
+
+
+def _read_knot_conf_map(core: client.CoreV1Api, cm_name: str = CONFIGMAP_NAME) -> Dict[str, str]:
+    cm = core.read_namespaced_config_map(cm_name, NAMESPACE)
     return dict(cm.data or {})
 
 
@@ -186,9 +200,13 @@ def _validate_knot_conf_bundle(
     }
 
 
-def _apply_knot_conf_and_restart(knot_conf: str) -> Dict[str, Any]:
+def _apply_knot_conf_and_restart(
+    knot_conf: str,
+    cm_name: str = CONFIGMAP_NAME,
+    deployment_name: str = KNOT_DEPLOYMENT,
+) -> Dict[str, Any]:
     core, apps = get_clients()
-    cm = core.read_namespaced_config_map(CONFIGMAP_NAME, NAMESPACE)
+    cm = core.read_namespaced_config_map(cm_name, NAMESPACE)
     if cm.data is None:
         cm.data = {}
     data = dict(cm.data)
@@ -197,8 +215,8 @@ def _apply_knot_conf_and_restart(knot_conf: str) -> Dict[str, Any]:
         raise HTTPException(status_code=400, detail=validation)
     data["knot.conf"] = knot_conf
     cm.data = data
-    core.patch_namespaced_config_map(CONFIGMAP_NAME, NAMESPACE, cm)
-    ts = _trigger_knot_restart(apps)
+    core.patch_namespaced_config_map(cm_name, NAMESPACE, cm)
+    ts = _trigger_knot_restart(apps, deployment_name)
     return {"status": "ok", "restarted_at": ts, "validation": validation}
 
 
@@ -432,9 +450,13 @@ def dns_health(_: Dict[str, Any] = Depends(get_current_user)) -> Dict[str, Any]:
 
 
 @app.get("/api/knot-conf")
-def get_knot_conf(_: Dict[str, Any] = Depends(get_current_user)) -> Dict[str, Any]:
+def get_knot_conf(
+    _: Dict[str, Any] = Depends(get_current_user),
+    instance: str | None = Query(None),
+) -> Dict[str, Any]:
+    cm_name, _ = _resolve_instance(instance)
     core, _ = get_clients()
-    data = _read_knot_conf_map(core)
+    data = _read_knot_conf_map(core, cm_name)
     raw = data.get("knot.conf") or ""
     schema = load_schema()
     return {"raw": raw, "schema_version": str(schema.get("version", "1"))}
@@ -446,9 +468,13 @@ def get_knot_conf_schema(_: Dict[str, Any] = Depends(get_current_user)) -> Dict[
 
 
 @app.get("/api/knot-conf/model")
-def get_knot_conf_model(_: Dict[str, Any] = Depends(get_current_user)) -> Dict[str, Any]:
+def get_knot_conf_model(
+    _: Dict[str, Any] = Depends(get_current_user),
+    instance: str | None = Query(None),
+) -> Dict[str, Any]:
+    cm_name, _ = _resolve_instance(instance)
     core, _ = get_clients()
-    raw = (_read_knot_conf_map(core)).get("knot.conf") or ""
+    raw = (_read_knot_conf_map(core, cm_name)).get("knot.conf") or ""
     root = parse_knot_conf(raw)
     model = extract_editor_model(root)
     return model.model_dump(mode="json", by_alias=True)
@@ -458,9 +484,11 @@ def get_knot_conf_model(_: Dict[str, Any] = Depends(get_current_user)) -> Dict[s
 def post_knot_conf_validate(
     body: KnotConfValidateBody,
     _: Dict[str, Any] = Depends(get_current_user),
+    instance: str | None = Query(None),
 ) -> Dict[str, Any]:
+    cm_name, _ = _resolve_instance(instance)
     core, _ = get_clients()
-    data = _read_knot_conf_map(core)
+    data = _read_knot_conf_map(core, cm_name)
     return _validate_knot_conf_bundle(body.content, data, axfr_override=body.axfr_override)
 
 
@@ -468,11 +496,13 @@ def post_knot_conf_validate(
 def post_knot_conf_render_model(
     body: Dict[str, Any],
     _: Dict[str, Any] = Depends(get_current_user),
+    instance: str | None = Query(None),
 ) -> Dict[str, str]:
     """Собрать knot.conf из JSON модели без записи в кластер (для проверки / предпросмотра)."""
     model = KnotEditorModel.model_validate(body)
+    cm_name, _ = _resolve_instance(instance)
     core, _ = get_clients()
-    raw = (_read_knot_conf_map(core)).get("knot.conf") or ""
+    raw = (_read_knot_conf_map(core, cm_name)).get("knot.conf") or ""
     root = parse_knot_conf(raw)
     new_doc = apply_editor_model(root, model)
     return {"content": serialize_knot_conf(new_doc)}
@@ -482,22 +512,26 @@ def post_knot_conf_render_model(
 def put_knot_conf_raw(
     body: KnotConfRawBody,
     _: Dict[str, Any] = Depends(get_current_user),
+    instance: str | None = Query(None),
 ) -> Dict[str, Any]:
-    return _apply_knot_conf_and_restart(body.content)
+    cm_name, dep_name = _resolve_instance(instance)
+    return _apply_knot_conf_and_restart(body.content, cm_name, dep_name)
 
 
 @app.put("/api/knot-conf/model")
 def put_knot_conf_model(
     body: Dict[str, Any],
     _: Dict[str, Any] = Depends(get_current_user),
+    instance: str | None = Query(None),
 ) -> Dict[str, Any]:
+    cm_name, dep_name = _resolve_instance(instance)
     model = KnotEditorModel.model_validate(body)
     core, _ = get_clients()
-    raw = (_read_knot_conf_map(core)).get("knot.conf") or ""
+    raw = (_read_knot_conf_map(core, cm_name)).get("knot.conf") or ""
     root = parse_knot_conf(raw)
     new_doc = apply_editor_model(root, model)
     text = serialize_knot_conf(new_doc)
-    return _apply_knot_conf_and_restart(text)
+    return _apply_knot_conf_and_restart(text, cm_name, dep_name)
 
 
 @app.get("/api/knot-conf/axfr-status")
@@ -812,7 +846,7 @@ def get_zone(zone_name: str, _: Dict[str, Any] = Depends(get_current_user)) -> D
     return {"zone": zone_name, "content": data[key]}
 
 
-def _trigger_knot_restart(apps: client.AppsV1Api) -> str:
+def _trigger_knot_restart(apps: client.AppsV1Api, deployment_name: str = KNOT_DEPLOYMENT) -> str:
     ts = dt.datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
     patch = {
         "spec": {
@@ -825,7 +859,7 @@ def _trigger_knot_restart(apps: client.AppsV1Api) -> str:
             }
         }
     }
-    apps.patch_namespaced_deployment(KNOT_DEPLOYMENT, NAMESPACE, patch)
+    apps.patch_namespaced_deployment(deployment_name, NAMESPACE, patch)
     return ts
 
 
@@ -946,6 +980,53 @@ def _apply_zone_update(zone_name: str, content: str) -> Dict[str, str]:
     return {"status": "ok", "restarted_at": ts, "notify_sent": str(notify_sent).lower()}
 
 
+class UpsertRecordBody(BaseModel):
+    name: str
+    rtype: str = "A"
+    value: str
+    ttl: int | None = None
+
+
+@app.post("/api/zones/{zone_name}/upsert-record")
+def upsert_zone_record(
+    zone_name: str,
+    body: UpsertRecordBody,
+    _: Dict[str, Any] = Depends(get_current_user),
+) -> Dict[str, str]:
+    """Добавить или обновить одну запись в зоне (по имени + типу)."""
+    validate_zone_name(zone_name)
+    core, _ = get_clients()
+    cm = core.read_namespaced_config_map(CONFIGMAP_NAME, NAMESPACE)
+    key = f"{zone_name}.zone"
+    data = dict(cm.data or {})
+    if key not in data:
+        raise HTTPException(status_code=404, detail=f"Зона {zone_name} не найдена")
+    try:
+        form = zone_text_to_form(zone_name, data[key])
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=400, detail=f"Не удалось разобрать zone-файл: {e}") from e
+    records: list[dict] = form.get("records", [])
+    match = next(
+        (r for r in records if r.get("name") == body.name and r.get("rtype") == body.rtype),
+        None,
+    )
+    if match:
+        match["value"] = body.value
+        if body.ttl is not None:
+            match["ttl"] = body.ttl
+    else:
+        rec: Dict[str, Any] = {"name": body.name, "rtype": body.rtype, "value": body.value}
+        if body.ttl is not None:
+            rec["ttl"] = body.ttl
+        records.append(rec)
+    form["records"] = records
+    try:
+        text = form_to_zone_text(zone_name, form)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=400, detail=f"Не удалось сформировать zone-файл: {e}") from e
+    return _apply_zone_update(zone_name, text)
+
+
 @app.put("/api/zones/{zone_name}")
 def update_zone(
     zone_name: str,
@@ -953,6 +1034,313 @@ def update_zone(
     _: Dict[str, Any] = Depends(get_current_user),
 ) -> Dict[str, str]:
     return _apply_zone_update(zone_name, body.content)
+
+
+# ---------------------------------------------------------------------------
+# Ingress Wizard — вспомогательные эндпоинты для зон
+# ---------------------------------------------------------------------------
+
+class FqdnRecord(BaseModel):
+    fqdn: str
+    rtype: str
+
+
+class ZoneFqdnsResponse(BaseModel):
+    records: List[FqdnRecord]
+
+
+@app.get("/api/zones/{zone_name}/fqdns", response_model=ZoneFqdnsResponse)
+def get_zone_fqdns(
+    zone_name: str,
+    _: Dict[str, Any] = Depends(get_current_user),
+) -> ZoneFqdnsResponse:
+    """FQDN из зоны, пригодные для Ingress (A / AAAA / CNAME записи)."""
+    validate_zone_name(zone_name)
+    core, _ = get_clients()
+    cm = core.read_namespaced_config_map(CONFIGMAP_NAME, NAMESPACE)
+    key = f"{zone_name}.zone"
+    data = cm.data or {}
+    if key not in data:
+        raise HTTPException(status_code=404, detail=f"Зона {zone_name} не найдена")
+    try:
+        form = zone_text_to_form(zone_name, data[key])
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=400, detail=f"Не удалось разобрать зону: {e}") from e
+
+    seen: dict[str, str] = {}
+    for rec in form.get("records", []):
+        rtype = str(rec.get("rtype") or "").upper()
+        if rtype not in ("A", "AAAA", "CNAME"):
+            continue
+        name = str(rec.get("name") or "@").strip()
+        if name == "@" or name == zone_name:
+            fqdn = zone_name
+        elif name.endswith("."):
+            fqdn = name.rstrip(".")
+        else:
+            fqdn = f"{name}.{zone_name}"
+        if fqdn not in seen:
+            seen[fqdn] = rtype
+
+    records = [FqdnRecord(fqdn=f, rtype=t) for f, t in sorted(seen.items())]
+    return ZoneFqdnsResponse(records=records)
+
+
+# ---------------------------------------------------------------------------
+# Ingress Wizard — модели и эндпоинты
+# ---------------------------------------------------------------------------
+
+class NamespacesResponse(BaseModel):
+    namespaces: List[str]
+
+
+class ServicePortInfo(BaseModel):
+    name: Optional[str] = None
+    port: int
+    protocol: str = "TCP"
+
+
+class ServiceInfo(BaseModel):
+    name: str
+    ports: List[ServicePortInfo]
+
+
+class ServicesResponse(BaseModel):
+    services: List[ServiceInfo]
+
+
+class IngressPathModel(BaseModel):
+    path: str = "/"
+    path_type: str = "Prefix"
+    service_name: str
+    service_port: int
+
+
+class IngressRuleModel(BaseModel):
+    host: Optional[str] = None
+    paths: List[IngressPathModel] = Field(default_factory=list)
+
+
+class IngressTlsModel(BaseModel):
+    secret_name: str
+    hosts: List[str] = Field(default_factory=list)
+
+
+class IngressRenderRequest(BaseModel):
+    name: str
+    namespace: str
+    ingress_class: Optional[str] = None
+    rules: List[IngressRuleModel] = Field(default_factory=list)
+    tls: Optional[IngressTlsModel] = None
+    annotations: Dict[str, str] = Field(default_factory=dict)
+
+
+class IngressRenderResponse(BaseModel):
+    yaml: str
+
+
+@app.get("/api/k8s/namespaces", response_model=NamespacesResponse)
+def list_k8s_namespaces(
+    _: Dict[str, Any] = Depends(get_current_user),
+) -> NamespacesResponse:
+    """Список пространств имён кластера."""
+    try:
+        core, _ = get_clients()
+        ns_list = core.list_namespace()
+        names = sorted(ns.metadata.name for ns in ns_list.items if ns.metadata)
+        return NamespacesResponse(namespaces=names)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Не удалось получить пространства имён: {e}") from e
+
+
+@app.get("/api/k8s/services", response_model=ServicesResponse)
+def list_k8s_services(
+    namespace: str = Query(...),
+    _: Dict[str, Any] = Depends(get_current_user),
+) -> ServicesResponse:
+    """Список сервисов и портов в пространстве имён."""
+    try:
+        core, _ = get_clients()
+        svc_list = core.list_namespaced_service(namespace)
+        services: List[ServiceInfo] = []
+        for svc in svc_list.items:
+            if not svc.metadata:
+                continue
+            ports = []
+            for p in (svc.spec.ports or []) if svc.spec else []:
+                ports.append(ServicePortInfo(name=p.name, port=p.port, protocol=p.protocol or "TCP"))
+            services.append(ServiceInfo(name=svc.metadata.name, ports=ports))
+        services.sort(key=lambda s: s.name)
+        return ServicesResponse(services=services)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Не удалось получить сервисы: {e}") from e
+
+
+def _build_ingress_dict(body: IngressRenderRequest) -> dict:
+    metadata: dict = {"name": body.name, "namespace": body.namespace}
+    if body.annotations:
+        metadata["annotations"] = dict(body.annotations)
+
+    spec: dict = {}
+    if body.ingress_class:
+        spec["ingressClassName"] = body.ingress_class
+
+    rules = []
+    for rule in body.rules:
+        http_paths = [
+            {
+                "path": p.path,
+                "pathType": p.path_type,
+                "backend": {
+                    "service": {
+                        "name": p.service_name,
+                        "port": {"number": p.service_port},
+                    }
+                },
+            }
+            for p in rule.paths
+        ]
+        rule_obj: dict = {"http": {"paths": http_paths}}
+        if rule.host:
+            rule_obj["host"] = rule.host
+        rules.append(rule_obj)
+    if rules:
+        spec["rules"] = rules
+
+    if body.tls:
+        spec["tls"] = [{"secretName": body.tls.secret_name, "hosts": list(body.tls.hosts)}]
+
+    return {
+        "apiVersion": "networking.k8s.io/v1",
+        "kind": "Ingress",
+        "metadata": metadata,
+        "spec": spec,
+    }
+
+
+class IngressItem(BaseModel):
+    name: str
+    namespace: str
+    ingress_class: Optional[str] = None
+    hosts: List[str]
+    rules: List[IngressRuleModel]
+    tls: Optional[IngressTlsModel] = None
+    annotations: Dict[str, str] = Field(default_factory=dict)
+    age: str = ""
+
+
+class IngressListResponse(BaseModel):
+    ingresses: List[IngressItem]
+
+
+def _format_age(ts: Any) -> str:
+    if ts is None:
+        return ""
+    try:
+        delta = dt.datetime.now(dt.timezone.utc) - ts
+        secs = int(delta.total_seconds())
+        if secs < 60:
+            return f"{secs}с"
+        if secs < 3600:
+            return f"{secs // 60}м"
+        if secs < 86400:
+            return f"{secs // 3600}ч"
+        return f"{secs // 86400}д"
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def _parse_k8s_ingress(ing: Any) -> IngressItem:
+    meta = ing.metadata or {}
+    spec = ing.spec or {}
+    name = meta.name or ""
+    namespace = meta.namespace or ""
+    ingress_class = spec.ingress_class_name or None
+    annotations = dict(meta.annotations or {})
+    age = _format_age(meta.creation_timestamp)
+
+    rules: List[IngressRuleModel] = []
+    hosts: List[str] = []
+    for r in spec.rules or []:
+        host = r.host or None
+        if host:
+            hosts.append(host)
+        paths: List[IngressPathModel] = []
+        http = r.http
+        if http:
+            for p in http.paths or []:
+                path_str = p.path or "/"
+                path_type = p.path_type or "Prefix"
+                svc_name = ""
+                svc_port = 80
+                if p.backend and p.backend.service:
+                    svc_name = p.backend.service.name or ""
+                    port_obj = p.backend.service.port
+                    if port_obj:
+                        svc_port = port_obj.number or 80
+                paths.append(IngressPathModel(
+                    path=path_str,
+                    path_type=path_type,
+                    service_name=svc_name,
+                    service_port=svc_port,
+                ))
+        rules.append(IngressRuleModel(host=host, paths=paths))
+
+    tls: Optional[IngressTlsModel] = None
+    for t in spec.tls or []:
+        tls = IngressTlsModel(
+            secret_name=t.secret_name or "",
+            hosts=list(t.hosts or []),
+        )
+        break  # берём первый TLS-блок
+
+    return IngressItem(
+        name=name,
+        namespace=namespace,
+        ingress_class=ingress_class,
+        hosts=hosts,
+        rules=rules,
+        tls=tls,
+        annotations=annotations,
+        age=age,
+    )
+
+
+@app.get("/api/k8s/ingresses", response_model=IngressListResponse)
+def list_k8s_ingresses(
+    namespace: Optional[str] = Query(None),
+    _: Dict[str, Any] = Depends(get_current_user),
+) -> IngressListResponse:
+    """Список Ingress-ресурсов кластера (все namespace или один)."""
+    try:
+        core, _ = get_clients()
+        net = client.NetworkingV1Api()
+        if namespace:
+            raw = net.list_namespaced_ingress(namespace)
+        else:
+            raw = net.list_ingress_for_all_namespaces()
+        ingresses = sorted(
+            [_parse_k8s_ingress(ing) for ing in raw.items],
+            key=lambda i: (i.namespace, i.name),
+        )
+        return IngressListResponse(ingresses=ingresses)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Не удалось получить Ingress-ресурсы: {e}") from e
+
+
+@app.post("/api/k8s/ingress/render", response_model=IngressRenderResponse)
+def render_ingress_manifest(
+    body: IngressRenderRequest,
+    _: Dict[str, Any] = Depends(get_current_user),
+) -> IngressRenderResponse:
+    """Сгенерировать YAML-манифест Ingress по параметрам мастера."""
+    ingress_dict = _build_ingress_dict(body)
+    yaml = _YAML()
+    yaml.default_flow_style = False
+    yaml.indent(mapping=2, sequence=4, offset=2)
+    buf = StringIO()
+    yaml.dump(ingress_dict, buf)
+    return IngressRenderResponse(yaml=buf.getvalue())
 
 
 def _install_spa(app: FastAPI) -> None:
