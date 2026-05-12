@@ -6,6 +6,7 @@
         <nav class="nav-links">
           <router-link class="nav-link" to="/">Зоны</router-link>
           <router-link class="nav-link" to="/knot-conf">knot.conf</router-link>
+          <router-link class="nav-link" to="/ingress-wizard">Ingress</router-link>
         </nav>
         <div class="dns-status">
           <span class="muted">Knot:</span>
@@ -29,6 +30,19 @@
       <el-button link type="danger" @click="logout">Выйти</el-button>
     </el-header>
     <el-main>
+      <div v-if="instances.length > 1" class="instance-selector mb12">
+        <span class="muted">Инстанс Knot:</span>
+        <el-select v-model="selectedInstanceId" size="small" style="width: 220px">
+          <el-option
+            v-for="inst in instances"
+            :key="inst.id"
+            :label="`${inst.label} (${inst.role})`"
+            :value="inst.id"
+          />
+        </el-select>
+        <el-tag v-if="!instanceIsPrimary" type="warning" size="small" effect="plain">secondary</el-tag>
+      </div>
+
       <el-alert
         v-if="secretsNote"
         type="info"
@@ -209,7 +223,7 @@
           <el-input v-model="rawContent" type="textarea" :rows="28" class="mono" placeholder="knot.conf" />
         </el-tab-pane>
 
-        <el-tab-pane label="AXFR (Secret)" name="axfr">
+        <el-tab-pane v-if="instanceIsPrimary" label="AXFR (Secret)" name="axfr">
           <el-alert
             v-if="axfrStatus && !axfrStatus.readable"
             type="warning"
@@ -357,11 +371,13 @@
         <pre class="mono pre-block">{{ validateResultText }}</pre>
       </el-card>
     </el-main>
+    <AppFooter />
   </el-container>
 </template>
 
 <script setup lang="ts">
 import { QuestionFilled } from "@element-plus/icons-vue";
+import AppFooter from "../components/AppFooter.vue";
 import { ElMessage } from "element-plus";
 import { computed, onMounted, reactive, ref, watch } from "vue";
 import { useRouter } from "vue-router";
@@ -378,6 +394,7 @@ import {
   type KnotConfModel,
   type KnotConfSaveResponse,
   type KnotConfValidateResponse,
+  type KnotInstance,
   type KnotSchemaField,
   type KnotSchemaResponse,
 } from "../api/client";
@@ -385,6 +402,39 @@ import {
 const router = useRouter();
 const activeTab = ref("form");
 const loading = ref(false);
+
+// ---- Instances ----
+const instances = ref<KnotInstance[]>([]);
+const selectedInstanceId = ref<string>("");
+
+const selectedInstance = computed(() =>
+  instances.value.find((i) => i.id === selectedInstanceId.value) ?? null,
+);
+
+const instanceIsPrimary = computed(
+  () => !selectedInstanceId.value || selectedInstance.value?.role === "primary",
+);
+
+function instanceQs(): string {
+  return selectedInstanceId.value ? `?instance=${encodeURIComponent(selectedInstanceId.value)}` : "";
+}
+
+async function loadInstances() {
+  try {
+    const { data } = await api.get<{ instances: KnotInstance[] }>("/api/instances");
+    instances.value = data.instances;
+    if (!selectedInstanceId.value && data.instances.length) {
+      const primary = data.instances.find((i) => i.role === "primary");
+      selectedInstanceId.value = primary?.id ?? data.instances[0]!.id;
+    }
+  } catch {
+    // если инстансы не настроены — работаем без селектора
+  }
+}
+
+watch(selectedInstanceId, async () => {
+  await Promise.all([reloadRaw(), reloadModel()]);
+});
 const validateLoading = ref(false);
 const saveRawLoading = ref(false);
 const saveModelLoading = ref(false);
@@ -641,7 +691,7 @@ async function loadSchema() {
 async function reloadRaw() {
   loading.value = true;
   try {
-    const { data } = await api.get<KnotConfGetResponse>("/api/knot-conf");
+    const { data } = await api.get<KnotConfGetResponse>(`/api/knot-conf${instanceQs()}`);
     rawContent.value = data.raw;
   } catch (e) {
     ElMessage.error(messageFromAxios(e, "Не удалось загрузить knot.conf"));
@@ -653,7 +703,7 @@ async function reloadRaw() {
 async function reloadModel() {
   loading.value = true;
   try {
-    const { data } = await api.get<KnotConfModel>("/api/knot-conf/model");
+    const { data } = await api.get<KnotConfModel>(`/api/knot-conf/model${instanceQs()}`);
     assignFormModel(data);
     ensureServerKeysFromSchema();
   } catch (e) {
@@ -731,6 +781,7 @@ async function generateTsig() {
 }
 
 async function loadAll() {
+  await loadInstances();
   await loadSchema();
   await Promise.all([reloadRaw(), reloadModel(), loadAxfrStatus(), loadAxfr()]);
 }
@@ -739,7 +790,7 @@ async function validateCurrent(source: "yaml" | "form") {
   let content = rawContent.value;
   if (source === "form") {
     try {
-      const { data } = await api.post<{ content: string }>("/api/knot-conf/render-model", toRawForm());
+      const { data } = await api.post<{ content: string }>(`/api/knot-conf/render-model${instanceQs()}`, toRawForm());
       content = data.content;
     } catch (e) {
       ElMessage.error(messageFromAxios(e, "Не удалось собрать YAML из формы"));
@@ -749,7 +800,7 @@ async function validateCurrent(source: "yaml" | "form") {
   validateLoading.value = true;
   validateResult.value = null;
   try {
-    const { data } = await api.post<KnotConfValidateResponse>("/api/knot-conf/validate", { content });
+    const { data } = await api.post<KnotConfValidateResponse>(`/api/knot-conf/validate${instanceQs()}`, { content });
     validateResult.value = data;
     if (data.ok) ElMessage.success("Проверка пройдена");
     else ElMessage.error("Проверка не пройдена — см. блок ниже");
@@ -771,8 +822,8 @@ async function validateAxfrFragment() {
   axfrValidateLoading.value = true;
   validateResult.value = null;
   try {
-    const { data: kc } = await api.get<KnotConfGetResponse>("/api/knot-conf");
-    const { data } = await api.post<KnotConfValidateResponse>("/api/knot-conf/validate", {
+    const { data: kc } = await api.get<KnotConfGetResponse>(`/api/knot-conf${instanceQs()}`);
+    const { data } = await api.post<KnotConfValidateResponse>(`/api/knot-conf/validate${instanceQs()}`, {
       content: kc.raw,
       axfr_override: axfrContent.value,
     });
@@ -790,7 +841,7 @@ async function saveRaw() {
   saveRawLoading.value = true;
   validateResult.value = null;
   try {
-    const { data } = await api.put<KnotConfSaveResponse>("/api/knot-conf", { content: rawContent.value });
+    const { data } = await api.put<KnotConfSaveResponse>(`/api/knot-conf${instanceQs()}`, { content: rawContent.value });
     validateResult.value = data.validation;
     ElMessage.success(`Сохранено, перезапуск ${data.restarted_at}`);
     await reloadModel();
@@ -807,9 +858,9 @@ async function saveModel() {
   saveModelLoading.value = true;
   validateResult.value = null;
   try {
-    const { data } = await api.put<KnotConfSaveResponse>("/api/knot-conf/model", toRawForm());
+    const { data } = await api.put<KnotConfSaveResponse>(`/api/knot-conf/model${instanceQs()}`, toRawForm());
     validateResult.value = data.validation;
-    rawContent.value = (await api.get<KnotConfGetResponse>("/api/knot-conf")).raw;
+    rawContent.value = (await api.get<KnotConfGetResponse>(`/api/knot-conf${instanceQs()}`)).data.raw;
     ElMessage.success(`Сохранено, перезапуск ${data.restarted_at}`);
     await reloadModel();
   } catch (e) {
@@ -982,5 +1033,11 @@ onMounted(async () => {
   margin: 8px 0 0;
   padding-left: 1.2em;
   font-size: 13px;
+}
+.instance-selector {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 </style>

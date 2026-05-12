@@ -6,6 +6,7 @@
         <nav class="nav-links">
           <router-link class="nav-link" to="/">Зоны</router-link>
           <router-link class="nav-link" to="/knot-conf">knot.conf</router-link>
+          <router-link class="nav-link" to="/ingress-wizard">Ingress</router-link>
         </nav>
         <div class="dns-status">
           <span class="muted">Knot:</span>
@@ -30,7 +31,10 @@
     </el-header>
     <el-main>
       <el-row :gutter="16" align="middle" style="margin-bottom: 12px">
-        <el-col :span="8">
+        <el-col :span="1" style="min-width: 80px">
+          <el-button link @click="$router.push({ name: 'home' })" style="font-size: 13px">← Зоны</el-button>
+        </el-col>
+        <el-col :span="7">
           <el-select
             v-model="selectedZone"
             placeholder="Зона"
@@ -72,53 +76,74 @@
           <el-tab-pane label="Записи" name="records">
           <el-card shadow="never">
             <template #header>A / AAAA / MX / TXT / CNAME …</template>
-            <el-table
-              :data="sortedRecords"
-              :row-class-name="recordRowClassName"
-              border
-              size="small"
-              style="width: 100%"
-            >
-              <el-table-column label="Имя" min-width="200">
-                <template #default="{ row }">
-                  <el-input v-model="row.name" placeholder="@" clearable />
-                </template>
-              </el-table-column>
-              <el-table-column label="TTL" width="110">
-                <template #default="{ row }">
-                  <el-input-number
-                    v-model="row.ttl"
-                    :min="1"
-                    :step="60"
-                    controls-position="right"
-                    class="ttl-input"
-                  />
-                </template>
-              </el-table-column>
-              <el-table-column label="Тип" width="120">
-                <template #default="{ row }">
-                  <el-select v-model="row.rtype" filterable>
-                    <el-option v-for="t in recordTypes" :key="t" :label="t" :value="t" />
-                  </el-select>
-                </template>
-              </el-table-column>
-              <el-table-column label="Значение" min-width="240">
-                <template #default="{ row }">
-                  <el-input
-                    v-model="row.value"
-                    type="textarea"
-                    :autosize="{ minRows: 1 }"
-                    placeholder="1.2.3.4 или 10 mail.example.com"
-                  />
-                </template>
-              </el-table-column>
-              <el-table-column width="90" align="center">
-                <template #default="{ row }">
-                  <el-button link type="danger" @click="removeRec(formModel.records.indexOf(row))">Удалить</el-button>
-                </template>
-              </el-table-column>
-            </el-table>
-            <el-button class="mt8" size="small" @click="addRec">Добавить запись</el-button>
+            <div class="records-wrapper">
+              <table class="dns-records-table">
+                <colgroup>
+                  <col class="col-name" />
+                  <col class="col-ttl" />
+                  <col class="col-type" />
+                  <col class="col-value" />
+                  <col class="col-action" />
+                </colgroup>
+                <thead>
+                  <tr>
+                    <th>Имя</th>
+                    <th>TTL</th>
+                    <th>Тип</th>
+                    <th>Значение</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody v-for="group in displayGroups" :key="group.key">
+                  <tr class="group-header-row" @click="toggleGroup(group.key)">
+                    <td colspan="5">
+                      <div class="group-header-inner">
+                        <el-icon class="collapse-icon">
+                          <ArrowDown v-if="!collapsedGroups.has(group.key)" />
+                          <ArrowRight v-else />
+                        </el-icon>
+                        <span class="group-name">{{ group.key === "@" ? "@ — корень зоны" : group.key }}</span>
+                        <el-tag size="small" round type="info">{{ group.records.length }}</el-tag>
+                        <el-button size="small" class="group-add-btn" @click.stop="addRecInGroup(group.key)">
+                          + Добавить
+                        </el-button>
+                      </div>
+                    </td>
+                  </tr>
+                  <template v-if="!collapsedGroups.has(group.key)">
+                    <tr v-for="rec in group.records" :key="formModel.records.indexOf(rec)" class="record-row">
+                      <td><el-input v-model="rec.name" placeholder="@" /></td>
+                      <td>
+                        <el-input-number
+                          v-model="rec.ttl"
+                          :min="1"
+                          :step="60"
+                          controls-position="right"
+                          class="ttl-input"
+                        />
+                      </td>
+                      <td>
+                        <el-select v-model="rec.rtype" filterable>
+                          <el-option v-for="t in recordTypes" :key="t" :label="t" :value="t" />
+                        </el-select>
+                      </td>
+                      <td>
+                        <el-input
+                          v-model="rec.value"
+                          type="textarea"
+                          :autosize="{ minRows: 1 }"
+                          placeholder="1.2.3.4 или 10 mail.example.com"
+                        />
+                      </td>
+                      <td class="action-cell">
+                        <el-button link type="danger" @click="removeRec(rec)">Удалить</el-button>
+                      </td>
+                    </tr>
+                  </template>
+                </tbody>
+              </table>
+              <el-button class="mt8" size="small" @click="addRec">Добавить запись (@)</el-button>
+            </div>
           </el-card>
           </el-tab-pane>
 
@@ -282,23 +307,11 @@
         </el-tabs>
       </div>
 
-      <el-dialog v-model="createDialogVisible" title="Новая зона" width="560px" @closed="resetCreateForm">
-        <el-form label-position="top">
-          <el-form-item label="Имя зоны (например example.com)">
-            <el-input v-model="newZoneName" placeholder="example.com" clearable />
-          </el-form-item>
-          <el-form-item label="Содержимое zone-файла (пусто — будет минимальный SOA/NS)">
-            <el-input v-model="newZoneContent" type="textarea" :rows="12" class="mono" />
-          </el-form-item>
-          <el-form-item>
-            <el-button @click="fillTemplate">Подставить шаблон по имени</el-button>
-          </el-form-item>
-        </el-form>
-        <template #footer>
-          <el-button @click="createDialogVisible = false">Отмена</el-button>
-          <el-button type="primary" :loading="creating" @click="submitNewZone">Создать</el-button>
-        </template>
-      </el-dialog>
+      <CreateZoneDialog
+        v-model:visible="createDialogVisible"
+        :existing-zones="zones"
+        @created="onZoneCreated"
+      />
 
       <el-dialog
         v-model="dsDialogVisible"
@@ -345,14 +358,18 @@
         </template>
       </el-dialog>
     </el-main>
+    <AppFooter />
   </el-container>
 </template>
 
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, reactive, ref, toRaw, watch } from "vue";
-import { useRouter } from "vue-router";
+import { useRouter, useRoute } from "vue-router";
 import { ElMessage } from "element-plus";
+import { ArrowDown, ArrowRight } from "@element-plus/icons-vue";
+import AppFooter from "../components/AppFooter.vue";
 import ZoneTextEditor from "../components/ZoneTextEditor.vue";
+import CreateZoneDialog from "../components/CreateZoneDialog.vue";
 import {
   api,
   AUTH_TOKEN_KEY,
@@ -366,20 +383,18 @@ import {
   type ZonesResponse,
   type ZoneResponse,
   type ValidateResponse,
+  type RecordRow,
 } from "../api/client";
-
 const router = useRouter();
+const route = useRoute();
 
 const zoneSummaries = ref<ZoneSummary[]>([]);
 const zones = computed(() => zoneSummaries.value.map((z) => z.name));
-const selectedZone = ref("");
+const selectedZone = ref((route.params.zone as string) || "");
 const content = ref("");
 const loading = ref(false);
 const saving = ref(false);
 const createDialogVisible = ref(false);
-const newZoneName = ref("");
-const newZoneContent = ref("");
-const creating = ref(false);
 
 const activeTab = ref<"records" | "soa" | "ns" | "dnssec" | "servers" | "text">("records");
 const formModel = reactive<ZoneFormModel>(emptyZoneForm());
@@ -515,31 +530,38 @@ function dnsGroupKey(name: string): string {
   return parts[parts.length - 1]!;
 }
 
-const sortedRecords = computed(() =>
-  [...formModel.records].sort((a, b) => {
+type DisplayGroup = { key: string; records: RecordRow[] };
+const displayGroups = ref<DisplayGroup[]>([]);
+const collapsedGroups = ref(new Set<string>());
+
+// Вызывается явно: при загрузке зоны, добавлении и удалении записи.
+// НЕ является computed — не реагирует на изменения полей записей,
+// поэтому список не прыгает при вводе.
+function rebuildDisplay() {
+  const sorted = [...formModel.records].sort((a, b) => {
     const ka = dnsNameSortKey(a.name || "@");
     const kb = dnsNameSortKey(b.name || "@");
     if (ka !== kb) return ka < kb ? -1 : 1;
     return (a.rtype || "").localeCompare(b.rtype || "");
-  }),
-);
-
-const groupStartSet = computed(() => {
-  const set = new Set<number>();
-  let lastGroup = "";
-  sortedRecords.value.forEach((row, i) => {
-    const g = dnsGroupKey(row.name || "@");
-    if (g !== lastGroup) {
-      set.add(i);
-      lastGroup = g;
-    }
   });
-  return set;
-});
-
-function recordRowClassName({ rowIndex }: { rowIndex: number }): string {
-  return groupStartSet.value.has(rowIndex) && rowIndex > 0 ? "rec-group-start" : "";
+  const groups = new Map<string, RecordRow[]>();
+  for (const rec of sorted) {
+    const key = dnsGroupKey(rec.name || "@");
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key)!.push(rec);
+  }
+  displayGroups.value = [...groups.entries()].map(([key, records]) => ({ key, records }));
 }
+
+function toggleGroup(key: string) {
+  const s = new Set(collapsedGroups.value);
+  s.has(key) ? s.delete(key) : s.add(key);
+  collapsedGroups.value = s;
+}
+
+watch(selectedZone, () => {
+  collapsedGroups.value = new Set();
+});
 
 function messageFromAxios(err: unknown, fallback: string): string {
   const d = (err as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail;
@@ -555,71 +577,14 @@ function messageFromAxios(err: unknown, fallback: string): string {
   return fallback;
 }
 
-function defaultZoneContent(zone: string): string {
-  const z = zone.trim().replace(/\.$/, "");
-  if (!z) return "";
-  const serial = `${new Date().toISOString().slice(0, 10).replace(/-/g, "")}01`;
-  return `$ORIGIN ${z}.
-$TTL 300
-@ IN SOA ns1.${z}. hostmaster.${z}. (
-  ${serial} ; serial
-  7200       ; refresh
-  3600       ; retry
-  1209600    ; expire
-  300        ; minimum
-)
-@ IN NS ns1.${z}.
-`;
-}
+
 
 function openCreateDialog() {
-  resetCreateForm();
   createDialogVisible.value = true;
 }
 
-function resetCreateForm() {
-  newZoneName.value = "";
-  newZoneContent.value = "";
-}
-
-function fillTemplate() {
-  const name = newZoneName.value.trim().replace(/\.$/, "");
-  if (!name) {
-    ElMessage.warning("Сначала введите имя зоны");
-    return;
-  }
-  newZoneContent.value = defaultZoneContent(name);
-}
-
-async function submitNewZone() {
-  const name = newZoneName.value.trim().replace(/\.$/, "");
-  if (!name) {
-    ElMessage.warning("Укажите имя зоны");
-    return;
-  }
-  if (zones.value.includes(name)) {
-    ElMessage.warning("Такая зона уже есть — выберите её в списке и редактируйте");
-    return;
-  }
-  const body = newZoneContent.value.trim() || defaultZoneContent(name);
-  if (!body.trim()) {
-    ElMessage.warning("Нет содержимого зоны");
-    return;
-  }
-  creating.value = true;
-  try {
-    await api.put(`/api/zones/${encodeURIComponent(name)}`, { content: body });
-    ElMessage.success("Зона создана, Knot перезапускается");
-    createDialogVisible.value = false;
-    resetCreateForm();
-    await loadZones();
-    selectedZone.value = name;
-    await loadZone();
-  } catch (e) {
-    ElMessage.error(messageFromAxios(e, "Не удалось создать зону"));
-  } finally {
-    creating.value = false;
-  }
+async function onZoneCreated(name: string) {
+  await router.push({ name: "zone-editor", params: { zone: name } });
 }
 
 function logout() {
@@ -632,6 +597,7 @@ function resetFormShell() {
   formModel.soa = f.soa;
   formModel.ns.splice(0, formModel.ns.length, ...f.ns);
   formModel.records.splice(0, formModel.records.length, ...f.records);
+  rebuildDisplay();
 }
 
 function assignForm(data: ZoneFormModel) {
@@ -647,6 +613,7 @@ function assignForm(data: ZoneFormModel) {
       value: r.value,
     })),
   );
+  rebuildDisplay();
 }
 
 const DNS_PROBE_SOURCE_HINT: Record<string, string> = {
@@ -677,9 +644,6 @@ async function fetchDnsHealth() {
 async function loadZones() {
   const { data } = await api.get<ZonesResponse>("/api/zones");
   zoneSummaries.value = data.zones;
-  if (!selectedZone.value && data.zones.length) {
-    selectedZone.value = data.zones[0]!.name;
-  }
   syncDnssecFromServer();
 }
 
@@ -700,6 +664,7 @@ async function loadZone() {
 }
 
 async function onZoneChange() {
+  await router.replace({ name: "zone-editor", params: { zone: selectedZone.value } });
   syncDnssecFromServer();
   await loadZone();
 }
@@ -808,10 +773,22 @@ function removeNs(i: number) {
 
 function addRec() {
   formModel.records.push({ name: "@", rtype: "A", value: "" });
+  rebuildDisplay();
 }
 
-function removeRec(i: number) {
-  formModel.records.splice(i, 1);
+function addRecInGroup(groupKey: string) {
+  const name = groupKey === "@" ? "@" : groupKey;
+  formModel.records.push({ name, rtype: "A", value: "" });
+  const s = new Set(collapsedGroups.value);
+  s.delete(groupKey);
+  collapsedGroups.value = s;
+  rebuildDisplay();
+}
+
+function removeRec(rec: RecordRow) {
+  const idx = formModel.records.indexOf(rec);
+  if (idx >= 0) formModel.records.splice(idx, 1);
+  rebuildDisplay();
 }
 
 watch(activeTab, (tab) => {
@@ -959,9 +936,53 @@ onUnmounted(() => {
 .mb12 {
   margin-bottom: 12px;
 }
-:deep(.rec-group-start td) {
-  border-top: 2px solid var(--el-border-color-darker) !important;
+.records-wrapper {
+  width: 100%;
+  overflow-x: auto;
 }
+.dns-records-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.dns-records-table thead th {
+  background: var(--el-fill-color-light);
+  border: 1px solid var(--el-border-color-lighter);
+  padding: 6px 10px;
+  font-weight: 600;
+  color: var(--el-text-color-regular);
+  text-align: left;
+  white-space: nowrap;
+}
+.col-name  { min-width: 200px; }
+.col-ttl   { width: 120px; }
+.col-type  { width: 130px; }
+.col-value { min-width: 240px; }
+.col-action { width: 90px; }
+
+.group-header-row td {
+  background: var(--el-fill-color);
+  border: 1px solid var(--el-border-color);
+  border-top: 2px solid var(--el-border-color-darker);
+  padding: 4px 10px;
+  cursor: pointer;
+  user-select: none;
+}
+.group-header-inner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.collapse-icon { color: var(--el-text-color-secondary); flex-shrink: 0; }
+.group-name { font-weight: 600; color: var(--el-text-color-primary); }
+.group-add-btn { margin-left: auto; }
+
+.record-row td {
+  border: 1px solid var(--el-border-color-lighter);
+  padding: 4px 8px;
+  vertical-align: middle;
+}
+.action-cell { text-align: center; }
 :deep(.el-textarea__inner) {
   word-break: break-all;
 }
