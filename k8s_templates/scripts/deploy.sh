@@ -116,6 +116,12 @@ if [[ -f "$OUT_DIR/00-namespace.yaml" ]]; then
   $KUBECTL apply -f "$OUT_DIR/00-namespace.yaml"
 fi
 
+# TLS-секрет для webhook — ДО основного deployment (иначе pod не сможет смонтировать)
+if [[ "${DNS01_MODE:-}" == "webhook" && -f "$OUT_DIR/cert-manager/dnsadmin-webhook-tls-secret.yaml" ]]; then
+  info "TLS-секрет для webhook (применяется перед deployment)..."
+  $KUBECTL apply -f "$OUT_DIR/cert-manager/dnsadmin-webhook-tls-secret.yaml"
+fi
+
 info "Применяю остальные манифесты..."
 for f in "$OUT_DIR"/*.yaml "$OUT_DIR"/secondary-*.yaml; do
   [[ -f "$f" ]] || continue

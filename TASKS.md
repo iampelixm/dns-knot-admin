@@ -89,3 +89,14 @@ DNSSEC DS/DNSKEY отображаются, но нет UI для первона�
 - APIService + ClusterIssuer + TLS Secret templates
 - YAML-patch для deployment/service при DNS01=webhook
 - init-answers.sh: выбор режима rfc2136 / webhook
+- DNS01_MODE filtering в build.sh (rfc2136/webhook)
+- sort_keys=False в yaml.dump() для сохранения порядка полей
+- APIService: groupPriorityMinimum/versionPriority + port 443
+- deploy.sh: TLS Secret применяется до deployment
+
+### 🔲 Проверить E2E (webhook DNS01)
+- [ ] Собрать образ dnsadmin с webhook-эндпоинтами
+- [ ] Развернуть с DNS01=yes, DNS01_MODE=webhook
+- [ ] Создать тестовый Certificate в cert-manager
+- [ ] Проверить, что сертификат выпущен (issued)
+- [ ] Проверить, что TXT-запись очищена после выпуска
