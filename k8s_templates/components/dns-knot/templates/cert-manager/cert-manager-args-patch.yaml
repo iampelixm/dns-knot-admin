@@ -1,4 +1,4 @@
-# Патч Deployment cert-manager для DNS01 (rfc2136).
+# Патч Deployment cert-manager для DNS01.
 # Скрипт deploy-dns-knot.sh применяет его стратегическим merge-патчем (kubectl patch),
 # при этом существующие --dns01-recursive-nameservers флаги не дублируются.
 #

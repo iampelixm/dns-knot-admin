@@ -216,7 +216,6 @@ if [[ -n "$ACL_ADDRS" ]]; then
 "
 fi
 if [[ "$DNS01" == "yes" ]]; then
-  CERTMANAGER_TSIG_SECRET="$(openssl rand -base64 32)"
   AXFR_CONF+="  - id: certmanager-key
     algorithm: hmac-sha256
     secret: ${CERTMANAGER_TSIG_SECRET}
@@ -225,7 +224,6 @@ if [[ "$DNS01" == "yes" ]]; then
     action: update
     key: certmanager-key
 "
-  export CERTMANAGER_TSIG_SECRET
 fi
 export AXFR_CONF="$(printf '%s\n' "$AXFR_CONF" | sed 's/^/    /')"
 
@@ -252,37 +250,53 @@ export KNOT_INSTANCES="$KNOT_INSTANCES_JSON"
 if [[ "$DNS01" == "yes" ]]; then
   export ACME_EMAIL="${ACME_EMAIL:-admin@$INGRESS_HOST}"
   export DNS01_NAMESERVER="${DNS01_NAMESERVER:-$DNS_PRIMARY_IP:53}"
+  export DNS01_MODE="${DNS01_MODE:-rfc2136}"
   export CERT_MANAGER_RBAC="  - apiGroups: [\"\"]
     resources: [\"secrets\"]
     resourceNames: [\"certmanager-tsig\"]
     verbs: [\"get\", \"create\", \"update\", \"patch\", \"delete\"]"
 
+  # TSIG-ключ для RFC2136 — всегда нужен, даже в webhook-режиме
+  # (cert-manager всё равно требует NS для проверки)
+  if [[ -z "${CERTMANAGER_TSIG_SECRET:-}" ]]; then
+    CERTMANAGER_TSIG_SECRET="$(openssl rand -base64 32)"
+  fi
+  export CERTMANAGER_TSIG_SECRET
+
   # Webhook-specific
-  export WEBHOOK_GROUP_NAME="${WEBHOOK_GROUP_NAME:-dnsadmin.knot.io}"
-  export WEBHOOK_VERSION="${WEBHOOK_VERSION:-v1}"
+  if [[ "$DNS01_MODE" == "webhook" ]]; then
+    export WEBHOOK_GROUP_NAME="${WEBHOOK_GROUP_NAME:-dnsadmin.knot.io}"
+    export WEBHOOK_VERSION="${WEBHOOK_VERSION:-v1}"
 
-  # Генерация самоподписанного CA и серверного сертификата для webhook
-  info "Генерация TLS-сертификатов для cert-manager webhook..."
-  TMP_CA_KEY="$(mktemp)" TMP_CA_CERT="$(mktemp)"
-  TMP_SERVER_KEY="$(mktemp)" TMP_SERVER_CSR="$(mktemp)" TMP_SERVER_CERT="$(mktemp)"
-  TMP_SERVER_EXT="$(mktemp)"
+    # Генерация самоподписанного CA и серверного сертификата для webhook
+    info "Генерация TLS-сертификатов для cert-manager webhook..."
+    TMP_CA_KEY="$(mktemp)" TMP_CA_CERT="$(mktemp)"
+    TMP_SERVER_KEY="$(mktemp)" TMP_SERVER_CSR="$(mktemp)" TMP_SERVER_CERT="$(mktemp)"
+    TMP_SERVER_EXT="$(mktemp)"
 
-  openssl req -x509 -newkey rsa:2048 -keyout "$TMP_CA_KEY" -out "$TMP_CA_CERT" \
-    -days 3650 -nodes -subj "/CN=dnsadmin-webhook-ca" 2>/dev/null
+    openssl req -x509 -newkey rsa:2048 -keyout "$TMP_CA_KEY" -out "$TMP_CA_CERT" \
+      -days 3650 -nodes -subj "/CN=dnsadmin-webhook-ca" 2>/dev/null
 
-  openssl req -newkey rsa:2048 -keyout "$TMP_SERVER_KEY" -out "$TMP_SERVER_CSR" \
-    -nodes -subj "/CN=dnsadmin.${NAMESPACE}.svc" 2>/dev/null
+    openssl req -newkey rsa:2048 -keyout "$TMP_SERVER_KEY" -out "$TMP_SERVER_CSR" \
+      -nodes -subj "/CN=dnsadmin.${NAMESPACE}.svc" 2>/dev/null
 
-  printf "subjectAltName = DNS:dnsadmin.%s.svc\n" "$NAMESPACE" > "$TMP_SERVER_EXT"
+    printf "subjectAltName = DNS:dnsadmin.%s.svc\n" "$NAMESPACE" > "$TMP_SERVER_EXT"
 
-  openssl x509 -req -in "$TMP_SERVER_CSR" -CA "$TMP_CA_CERT" -CAkey "$TMP_CA_KEY" \
-    -CAcreateserial -out "$TMP_SERVER_CERT" -days 365 -extfile "$TMP_SERVER_EXT" 2>/dev/null
+    openssl x509 -req -in "$TMP_SERVER_CSR" -CA "$TMP_CA_CERT" -CAkey "$TMP_CA_KEY" \
+      -CAcreateserial -out "$TMP_SERVER_CERT" -days 365 -extfile "$TMP_SERVER_EXT" 2>/dev/null
 
-  export WEBHOOK_CA_BUNDLE="$(base64 -w0 < "$TMP_CA_CERT")"
-  export WEBHOOK_TLS_CERT="$(base64 -w0 < "$TMP_SERVER_CERT")"
-  export WEBHOOK_TLS_KEY="$(base64 -w0 < "$TMP_SERVER_KEY")"
+    export WEBHOOK_CA_BUNDLE="$(base64 -w0 < "$TMP_CA_CERT")"
+    export WEBHOOK_TLS_CERT="$(base64 -w0 < "$TMP_SERVER_CERT")"
+    export WEBHOOK_TLS_KEY="$(base64 -w0 < "$TMP_SERVER_KEY")"
 
-  rm -f "$TMP_CA_KEY" "$TMP_CA_CERT" "$TMP_SERVER_KEY" "$TMP_SERVER_CSR" "$TMP_SERVER_CERT" "$TMP_SERVER_EXT"
+    rm -f "$TMP_CA_KEY" "$TMP_CA_CERT" "$TMP_SERVER_KEY" "$TMP_SERVER_CSR" "$TMP_SERVER_CERT" "$TMP_SERVER_EXT"
+  else
+    export WEBHOOK_GROUP_NAME=""
+    export WEBHOOK_VERSION=""
+    export WEBHOOK_CA_BUNDLE=""
+    export WEBHOOK_TLS_CERT=""
+    export WEBHOOK_TLS_KEY=""
+  fi
 else
   export ACME_EMAIL=""
   export DNS01_NAMESERVER=""
@@ -292,6 +306,7 @@ else
   export WEBHOOK_CA_BUNDLE=""
   export WEBHOOK_TLS_CERT=""
   export WEBHOOK_TLS_KEY=""
+  export DNS01_MODE=""
 fi
 
 # ── Рендер ─────────────────────────────────────────────────────────────────────
@@ -326,10 +341,19 @@ if [[ -n "$CERT_MANAGER_COND" && "${!CERT_MANAGER_COND:-no}" == "yes" ]]; then
   info "cert-manager-шаблоны (DNS01):"
   mkdir -p "$OUT_DIR/cert-manager"
   render_group "$COMPONENT_DIR/$CERT_MANAGER_TEMPLATES" "$OUT_DIR/cert-manager"
+
+  # Удаляем файлы, не соответствующие DNS01_MODE
+  if [[ "$DNS01_MODE" == "webhook" ]]; then
+    rm -f "$OUT_DIR/cert-manager/cluster-issuer-rfc2136.yaml"
+  elif [[ "$DNS01_MODE" == "rfc2136" ]]; then
+    rm -f "$OUT_DIR/cert-manager/cluster-issuer-webhook.yaml" \
+          "$OUT_DIR/cert-manager/apiservice-webhook.yaml" \
+          "$OUT_DIR/cert-manager/dnsadmin-webhook-tls-secret.yaml"
+  fi
 fi
 
 # ── Патч deployment + service для webhook (TLS + порт 8443) ──────────────
-if [[ "$DNS01" == "yes" ]]; then
+if [[ "$DNS01_MODE" == "webhook" ]]; then
   info "Патч deployment/service для cert-manager webhook (TLS + 8443)..."
   python3 - "$OUT_DIR/80-dnsadmin-deployment.yaml" "$OUT_DIR/90-dnsadmin-service.yaml" <<'PY'
 import sys, yaml
@@ -368,7 +392,7 @@ dep["spec"]["template"]["spec"].setdefault("volumes", []).append({
 })
 
 with open(dep_path, "w") as f:
-    yaml.dump(dep, f, default_flow_style=False)
+    yaml.dump(dep, f, default_flow_style=False, sort_keys=False)
 
 # Patch service
 with open(svc_path) as f:
@@ -381,7 +405,7 @@ svc["spec"]["ports"].append({
 })
 
 with open(svc_path, "w") as f:
-    yaml.dump(svc, f, default_flow_style=False)
+    yaml.dump(svc, f, default_flow_style=False, sort_keys=False)
 PY
 fi
 
