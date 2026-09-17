@@ -1,0 +1,12 @@
+apiVersion: apiregistration.k8s.io/v1
+kind: APIService
+metadata:
+  name: {{WEBHOOK_VERSION}}.{{WEBHOOK_GROUP_NAME}}
+spec:
+  group: {{WEBHOOK_GROUP_NAME}}
+  version: {{WEBHOOK_VERSION}}
+  service:
+    namespace: {{NAMESPACE}}
+    name: dnsadmin
+    port: 8443
+  caBundle: {{WEBHOOK_CA_BUNDLE}}

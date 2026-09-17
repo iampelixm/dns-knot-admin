@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: knot-data
+  namespace: {{NAMESPACE}}
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: {{PVC_STORAGE_CLASS}}
+  resources:
+    requests:
+      storage: {{PVC_SIZE}}

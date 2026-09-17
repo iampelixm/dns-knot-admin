@@ -1,0 +1,22 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: dnsadmin
+  namespace: {{NAMESPACE}}
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: {{INGRESS_ENTRYPOINT}}
+    {{INGRESS_TLS_ANNOTATION}}
+spec:
+  ingressClassName: {{INGRESS_CLASS}}
+  {{INGRESS_TLS}}
+  rules:
+    - host: {{INGRESS_HOST}}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: dnsadmin
+                port:
+                  number: 80

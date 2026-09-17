@@ -1,0 +1,89 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: knot
+  namespace: {{NAMESPACE}}
+  labels:
+    app: knot
+    knot-instance: "{{DNS_PRIMARY_ID}}"
+    knot-role: primary
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: knot
+      knot-instance: "{{DNS_PRIMARY_ID}}"
+  template:
+    metadata:
+      labels:
+        app: knot
+        knot-instance: "{{DNS_PRIMARY_ID}}"
+        knot-role: primary
+    spec:
+      nodeName: {{DNS_PRIMARY_NODE}}
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      containers:
+        - name: knot
+          image: {{KNOT_IMAGE}}
+          imagePullPolicy: IfNotPresent
+          command:
+            - knotd
+          args:
+            - -c
+            - /etc/knot/knot.conf
+          ports:
+            - name: dns-udp
+              containerPort: 53
+              protocol: UDP
+            - name: dns-tcp
+              containerPort: 53
+              protocol: TCP
+          readinessProbe:
+            tcpSocket:
+              host: {{DNS_PRIMARY_IP}}
+              port: 53
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              host: {{DNS_PRIMARY_IP}}
+              port: 53
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          volumeMounts:
+            - name: knot-config
+              mountPath: /etc/knot/knot.conf
+              subPath: knot.conf
+              readOnly: true
+            - name: knot-zones
+              mountPath: /zones
+              readOnly: true
+            - name: knot-axfr
+              mountPath: /etc/knot/conf.d/axfr.conf
+              subPath: axfr.conf
+              readOnly: true
+            - name: knot-data
+              mountPath: /var/lib/knot
+      volumes:
+        - name: knot-config
+          configMap:
+            name: knot-config
+        - name: knot-zones
+          configMap:
+            name: knot-config
+        - name: knot-axfr
+          secret:
+            secretName: {{AXFR_SECRET_NAME}}
+        - name: knot-data
+          persistentVolumeClaim:
+            claimName: knot-data

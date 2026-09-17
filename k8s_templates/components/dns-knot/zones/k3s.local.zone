@@ -1,0 +1,11 @@
+$ORIGIN k3s.local.
+$TTL 300
+@ IN SOA ns1.k3s.local. hostmaster.k3s.local. (
+  2026033001 ; serial
+  3600       ; refresh
+  900        ; retry
+  1209600    ; expire
+  300        ; minimum
+)
+@   IN NS   ns1.k3s.local.
+ns1 IN A    10.0.0.10

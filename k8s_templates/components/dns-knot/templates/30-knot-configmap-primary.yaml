@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: knot-config
+  namespace: {{NAMESPACE}}
+  labels:
+    app: knot
+    knot-instance: "{{DNS_PRIMARY_ID}}"
+    knot-role: primary
+  annotations:
+    knot-listen-ip: "{{DNS_PRIMARY_IP}}"
+    knot-node: "{{DNS_PRIMARY_NODE}}"
+data:
+  knot.conf: |
+{{KNOT_CONF}}
+{{ZONES_DATA}}

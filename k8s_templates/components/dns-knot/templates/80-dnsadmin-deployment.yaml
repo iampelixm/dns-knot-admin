@@ -1,0 +1,86 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dnsadmin
+  namespace: {{NAMESPACE}}
+  labels:
+    app: dnsadmin
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: dnsadmin
+  template:
+    metadata:
+      labels:
+        app: dnsadmin
+    spec:
+      serviceAccountName: dnsadmin
+      nodeName: {{UI_NODE}}
+      tolerations:
+        - key: node-role.kubernetes.io/control-plane
+          operator: Exists
+          effect: NoSchedule
+        - key: node-role.kubernetes.io/master
+          operator: Exists
+          effect: NoSchedule
+      imagePullSecrets:
+        - name: {{PULL_SECRET_NAME}}
+      containers:
+        - name: dnsadmin
+          image: {{DNSADMIN_IMAGE}}
+          imagePullPolicy: Always
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: NAMESPACE
+              value: {{NAMESPACE}}
+            - name: KNOT_CONFIGMAP_NAME
+              value: knot-config
+            - name: KNOT_DEPLOYMENT_NAME
+              value: knot
+            - name: DEFAULT_ZONE
+              value: {{DEFAULT_ZONE}}
+            - name: KNOT_DNS_HOST
+              value: knot
+            - name: DNS_HEALTH_PROBE_ZONE
+              value: {{DEFAULT_ZONE}}
+            - name: KNOT_INSTANCES
+              value: '{{KNOT_INSTANCES}}'
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: dnsadmin-auth
+                  key: JWT_SECRET
+            - name: ADMIN_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: dnsadmin-auth
+                  key: ADMIN_USERNAME
+            - name: ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: dnsadmin-auth
+                  key: ADMIN_PASSWORD
+            - name: WEBHOOK_GROUP_NAME
+              value: '{{WEBHOOK_GROUP_NAME}}'
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 15
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 400m
+              memory: 512Mi

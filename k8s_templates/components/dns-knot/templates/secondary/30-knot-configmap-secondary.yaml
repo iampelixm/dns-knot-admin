@@ -1,0 +1,39 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: knot-config-{{INSTANCE_ID}}
+  namespace: {{NAMESPACE}}
+  labels:
+    app: knot
+    knot-instance: "{{INSTANCE_ID}}"
+    knot-role: secondary
+  annotations:
+    knot-listen-ip: "{{NODE_IP}}"
+    knot-node: "{{NODE_NAME}}"
+data:
+  knot.conf: |
+    server:
+      listen: {{NODE_IP}}@53
+      identity: {{NS_IDENTITY}}
+      nsid: {{NS_IDENTITY}}
+
+    log:
+      - target: stdout
+        any: info
+
+    database:
+      storage: /var/lib/knot
+
+    include: /etc/knot/conf.d/axfr.conf
+
+    remote:
+      - id: primary
+        address: {{PRIMARY_IP}}@53
+        key: {{AXFR_KEY_ID}}
+
+    zone-defaults:
+      refresh-min-interval: 14400
+      refresh-max-interval: 86400
+
+    zone:
+{{SECONDARY_ZONES}}

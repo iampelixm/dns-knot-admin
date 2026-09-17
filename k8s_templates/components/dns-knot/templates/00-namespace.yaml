@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{NAMESPACE}}
+  labels:
+    app.kubernetes.io/name: dns-knot
+    app.kubernetes.io/component: dns
