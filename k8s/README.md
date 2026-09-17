@@ -61,3 +61,55 @@ dnsadmin вызывает **`knotc conf-check`** во временном кат�
 ## Примечание про systemd-resolved и :53
 
 Если на ноде порт 53 на loopback занят resolver’ом, в `knot.conf` часто выбирают привязку `listen` на конкретный внешний IP ноды, а не на `0.0.0.0@53`. Тогда пробы `tcpSocket` в Deployment должны бить в **тот же** адрес и порт, где реально слушает Knot.
+
+## cert-manager DNS01 (webhook-провайдер)
+
+Начиная с версии 0.4.12, dnsadmin реализует **cert-manager webhook DNS-01-провайдера**.  
+Это альтернатива RFC2136: dnsadmin вместо TSIG-ключа напрямую добавляет `_acme-challenge` TXT-записи в зоны Knot через ConfigMap.
+
+### Как это работает
+
+```
+cert-manager → APIService (v1.dnsadmin.knot.io) → dnsadmin:8443 (HTTPS webhook)
+```
+
+1. **build.sh** при `DNS01=yes` + `DNS01_MODE=webhook`:
+   - Генерирует самоподписанный CA + серверный сертификат для `dnsadmin.{ns}.svc`
+   - Создаёт манифесты: TLS Secret, APIService, ClusterIssuer (webhook)
+   - Патчит deployment dnsadmin (порт 8443, TLS volume mount, env vars)
+2. dnsadmin слушает HTTP на 8080 (UI) + HTTPS на 8443 (webhook)
+3. cert-manager обнаруживает webhook через APIService и отправляет запросы
+4. dnsadmin создаёт/удаляет `_acme-challenge.{zone}` TXT-запись в ConfigMap → Knot
+
+### Переменные окружения (dnsadmin)
+
+| Переменная | По умолчанию | Описание |
+|-----------|-------------|----------|
+| `TLS_CERT_PATH` | – | Путь к TLS-сертификату (webhook) |
+| `TLS_KEY_PATH` | – | Путь к TLS-ключу |
+| `WEBHOOK_GROUP_NAME` | `dnsadmin.knot.io` | GroupName для cert-manager webhook |
+
+### Порт 8443
+
+Когда `DNS01=yes`, в deployment добавляется контейнерный порт `https-webhook:8443`,  
+а в service — порт `443 → 8443`. APIService указывает на `dnsadmin.{ns}.svc:8443`.
+
+### TLS-сертификат
+
+Генерируется автоматически в `build.sh` (CA + server cert для `dnsadmin.{ns}.svc`),  
+упаковывается в Secret `dnsadmin-webhook-tls`.
+
+### Обновление cert-manager Deployment
+
+cert-manager требует аргументы `--dns01-recursive-nameservers` и `--dns01-recursive-nameservers-only`,  
+чтобы не ходить в публичные DNS при верификации `_acme-challenge` TXT.  
+Файл `cert-manager-args-patch.yaml` добавляет их — применяется скриптом `deploy.sh`.
+
+### Сравнение RFC2136 vs webhook
+
+| Аспект | RFC2136 | Webhook |
+|--------|---------|---------|
+| Аутентификация | TSIG-ключ (HMAC-SHA256) | HTTPS + сертификат |
+| Путь к Knot | Через TSIG-обновление зоны | Через ConfigMap (Kubernetes API) |
+| Сложность | Нужен TSIG-ключ в cert-manager | Нужен TLS-сертификат + APIService |
+| Безопасность | Ключ в Secret cert-manager | Сертификат под контролем build.sh |

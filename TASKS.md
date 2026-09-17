@@ -81,3 +81,11 @@ DNSSEC DS/DNSKEY отображаются, но нет UI для первона�
 ### ✅ JWT-аутентификация
 - POST /api/auth/login → Bearer-токен
 - Все /api/* эндпоинты защищены
+
+### ✅ cert-manager webhook DNS-01 (v0.4.12)
+- Webhook endpoints: present/cleanup/healthz с поддержкой APIService-путей
+- run.py: dual-port uvicorn (HTTP 8080 + HTTPS 8443)
+- build.sh: генерация самоподписанного CA + server cert
+- APIService + ClusterIssuer + TLS Secret templates
+- YAML-patch для deployment/service при DNS01=webhook
+- init-answers.sh: выбор режима rfc2136 / webhook

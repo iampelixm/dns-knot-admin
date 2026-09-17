@@ -520,6 +520,47 @@ JSON Schema для knot.conf.
 
 ---
 
+## cert-manager Webhook (DNS-01)
+
+Эндпоинты для cert-manager webhook DNS-01-провайдера.
+Доступны без JWT (только внутри кластера, через APIService).
+
+| Метод | Путь | Описание |
+|-------|------|---------|
+| GET | `/{groupName}/healthz` | Health check |
+| POST | `/{groupName}/present` | Создать `_acme-challenge` TXT-запись |
+| POST | `/{groupName}/cleanup` | Удалить `_acme-challenge` TXT-запись |
+| GET | `/{groupName}/v1/healthz` | APIService-путь (с версией) |
+| POST | `/{groupName}/v1/present` | APIService-путь |
+| POST | `/{groupName}/v1/cleanup` | APIService-путь |
+
+`groupName` по умолчанию: `dnsadmin.knot.io` (задаётся `WEBHOOK_GROUP_NAME`).
+
+### WebhookChallengeRequest
+
+```json
+{
+  "dnsName": "_acme-challenge.example.com",
+  "key": "abc123...",
+  "zone": "example.com",
+  "type": "TXT"
+}
+```
+
+### Ответ
+
+```json
+{ "status": "ok" }
+```
+
+### Схема работы
+
+1. cert-manager → APIService `v1.dnsadmin.knot.io` → `dnsadmin:8443`
+2. dnsadmin добавляет TXT-запись `_acme-challenge.{zone}` в Knot-зону через ConfigMap
+3. После подтверждения — удаляет запись
+
+---
+
 ## Доступ
 
 Сейчас висит на `dnsadmin.k3s.local` (только внутри кластера, entrypoint `web`).  
