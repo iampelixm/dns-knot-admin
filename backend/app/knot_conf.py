@@ -120,3 +120,15 @@ def zone_declared_in_knot_conf(knot_conf: str, zone_name: str) -> bool:
         return True
     except ValueError:
         return False
+
+
+def ensure_zone_in_knot_conf_secondary(knot_conf: str, zone_name: str) -> str:
+    """Добавить зону в knot.conf secondary (master/notify формат)."""
+    if re.search(rf"(?m)^\s*-\s*domain:\s*{re.escape(zone_name)}\s*$", knot_conf):
+        return knot_conf
+    block = (
+        f"  - domain: {zone_name}\n"
+        f"    master: [primary-remote]\n"
+        f"    acl: [notify-allowed]\n"
+    )
+    return knot_conf.rstrip() + "\n" + block + "\n"

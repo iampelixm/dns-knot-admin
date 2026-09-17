@@ -27,6 +27,7 @@ from app.axfr_secret import axfr_diag_public_dict, generate_tsig_yaml_fragment, 
 from app.dns_probe import knot_probe, query_soa_serial
 from app.dnssec_ds import fetch_ds_records_for_zone, zone_is_ru_family
 from app.knot_conf import list_zone_dnssec_flags, set_zone_dnssec_signing, zone_declared_in_knot_conf
+from app.knot_conf import ensure_zone_in_knot_conf_secondary
 from app.knot_editor_model import KnotEditorModel, apply_editor_model, extract_editor_model
 from app.knot_validate import knot_conf_needs_axfr, run_knotc_conf_check
 from app.knot_yaml import load_schema, parse_knot_conf, serialize_knot_conf
@@ -68,7 +69,7 @@ STATIC_DIR = Path(os.environ.get("STATIC_DIR", "")).resolve() if os.environ.get(
 
 bearer_scheme = HTTPBearer(auto_error=False)
 
-app = FastAPI(title="dnsadmin", version="0.4.0", docs_url=None, redoc_url=None)
+app = FastAPI(title="dnsadmin", version="0.4.11")
 
 
 def get_clients():
@@ -706,6 +707,12 @@ def put_axfr_fragment(
 
 @app.post("/api/auth/login", response_model=TokenResponse)
 def login(body: LoginBody) -> TokenResponse:
+    """Аутентификация администратора.
+
+    Возвращает JWT-токен (Bearer) для доступа к API.
+    Все остальные эндпоинты требуют заголовок `Authorization: Bearer <token>`.
+    Токен живёт 24 часа (настраивается через JWT_EXPIRE_HOURS).
+    """
     if body.username != ADMIN_USERNAME or body.password != ADMIN_PASSWORD:
         raise HTTPException(status_code=401, detail="Неверный логин или пароль")
     return TokenResponse(access_token=_issue_token(body.username))
@@ -721,7 +728,18 @@ def get_instances(_: Dict[str, Any] = Depends(get_current_user)) -> Dict[str, An
 def get_zones_sync_status(_: Dict[str, Any] = Depends(get_current_user)) -> Dict[str, Any]:
     """
     Сверка SOA serial по всем зонам на всех инстансах.
+
     Требует KNOT_INSTANCES. Возвращает матрицу зона × сервер с serial и статусом синхронизации.
+    ```json
+    {
+      "instances": [...],
+      "zones": [{
+        "zone": "summersite.ru",
+        "servers": [{"id": "ns", "serial": 2026091701, "synced": true, ...}],
+        "primary_serial": 2026091701
+      }]
+    }
+    ```
     """
     if not KNOT_INSTANCES_LIST:
         return {"instances": [], "zones": [], "warning": "KNOT_INSTANCES не настроен — мульти-инстанс отключён"}
@@ -764,6 +782,11 @@ def get_zones_sync_status(_: Dict[str, Any] = Depends(get_current_user)) -> Dict
 
 @app.get("/api/zones")
 def list_zones(_: Dict[str, Any] = Depends(get_current_user)) -> Dict[str, Any]:
+    """Список зон из primary ConfigMap.
+
+    Каждая зона с пометкой dnssec_signing (on/off).
+    Первая зона — DEFAULT_ZONE (k3s.local).
+    """
     core, _ = get_clients()
     cm = core.read_namespaced_config_map(CONFIGMAP_NAME, NAMESPACE)
     raw = cm.data or {}
@@ -836,6 +859,7 @@ def save_zone_form(
 
 @app.get("/api/zones/{zone_name}")
 def get_zone(zone_name: str, _: Dict[str, Any] = Depends(get_current_user)) -> Dict[str, str]:
+    """Получить zone-файл из ConfigMap."""
     validate_zone_name(zone_name)
     core, _ = get_clients()
     cm = core.read_namespaced_config_map(CONFIGMAP_NAME, NAMESPACE)
@@ -948,6 +972,36 @@ def get_zone_dnssec_ds(
     }
 
 
+def _sync_zone_to_secondaries(zone_name: str, core: client.CoreV1Api, apps: client.AppsV1Api) -> list[str]:
+    """Добавить зону в knot.conf всех secondary инстансов, если её там нет.
+    Возвращает список ID инстансов, которые были перезапущены."""
+    restarted: list[str] = []
+    for inst in KNOT_INSTANCES_LIST:
+        if inst.get("role") != "secondary":
+            continue
+        cm_name = inst.get("configmap", "")
+        dep_name = inst.get("deployment", "")
+        if not cm_name or not dep_name:
+            continue
+        try:
+            sec_cm = core.read_namespaced_config_map(cm_name, NAMESPACE)
+            if sec_cm.data is None:
+                sec_cm.data = {}
+            sec_conf = sec_cm.data.get("knot.conf", "")
+            if not sec_conf:
+                continue
+            new_conf = ensure_zone_in_knot_conf_secondary(sec_conf, zone_name)
+            if new_conf == sec_conf:
+                continue
+            sec_cm.data["knot.conf"] = new_conf
+            core.patch_namespaced_config_map(cm_name, NAMESPACE, sec_cm)
+            _trigger_knot_restart(apps, dep_name)
+            restarted.append(inst.get("id", ""))
+        except Exception:  # noqa: BLE001
+            logger.warning("Не удалось синхронизировать зону %s на инстанс %s", zone_name, inst.get("id"))
+    return restarted
+
+
 def _apply_zone_update(zone_name: str, content: str) -> Dict[str, str]:
     validate_zone_name(zone_name)
     ok, errs = validate_zonefile(zone_name, content)
@@ -968,16 +1022,25 @@ def _apply_zone_update(zone_name: str, content: str) -> Dict[str, str]:
         try:
             content = apply_serial_bump(content, zone_name)
         except Exception:  # noqa: BLE001
-            pass  # не ломаем сохранение если bump не удался
+            pass
 
     cm.data[key] = content
-    if is_new and cm.data.get("knot.conf"):
+    if cm.data.get("knot.conf"):
         cm.data["knot.conf"] = ensure_zone_in_knot_conf(cm.data["knot.conf"], zone_name)
     core.patch_namespaced_config_map(CONFIGMAP_NAME, NAMESPACE, cm)
 
     ts = _trigger_knot_restart(apps)
+
+    # Синхронизация secondary (на каждом сохранении, а не только для новых зон)
+    synced = _sync_zone_to_secondaries(zone_name, core, apps)
+
     notify_sent = _knotc_zone_notify(zone_name)
-    return {"status": "ok", "restarted_at": ts, "notify_sent": str(notify_sent).lower()}
+    return {
+        "status": "ok",
+        "restarted_at": ts,
+        "notify_sent": str(notify_sent).lower(),
+        "synced_secondaries": synced,
+    }
 
 
 class UpsertRecordBody(BaseModel):
@@ -993,7 +1056,14 @@ def upsert_zone_record(
     body: UpsertRecordBody,
     _: Dict[str, Any] = Depends(get_current_user),
 ) -> Dict[str, str]:
-    """Добавить или обновить одну запись в зоне (по имени + типу)."""
+    """Добавить или обновить одну запись в зоне (по имени + типу).
+
+    Автоматически:
+    - serial bump
+    - рестарт primary Knot
+    - синхронизация secondary ConfigMap (для новых зон)
+    - zone-notify
+    """
     validate_zone_name(zone_name)
     core, _ = get_clients()
     cm = core.read_namespaced_config_map(CONFIGMAP_NAME, NAMESPACE)
@@ -1033,7 +1103,77 @@ def update_zone(
     body: ZoneBody,
     _: Dict[str, Any] = Depends(get_current_user),
 ) -> Dict[str, str]:
+    """Сохранить zone-файл.
+
+    Автоматически добавляется в knot.conf primary и всех secondary.
+    Выполняется serial bump, перезапуск Knot, zone-notify и синхронизация secondary.
+    """
     return _apply_zone_update(zone_name, body.content)
+
+
+# ---------------------------------------------------------------------------
+# Sync — принудительная синхронизация зон на secondary
+# ---------------------------------------------------------------------------
+
+
+class ZoneSyncResult(BaseModel):
+    zone: str
+    synced_secondaries: list[str]
+    skipped: list[str]
+
+
+@app.post("/api/zones/{zone_name}/sync")
+def sync_zone(
+    zone_name: str,
+    _: Dict[str, Any] = Depends(get_current_user),
+) -> ZoneSyncResult:
+    """Принудительная синхронизация зоны на все secondary инстансы.
+
+    Добавляет блок зоны в knot.conf каждого secondary ConfigMap,
+    если её там нет, и перезапускает соответствующие Knot-деплойменты.
+    """
+    validate_zone_name(zone_name)
+    core, apps = get_clients()
+    cm = core.read_namespaced_config_map(CONFIGMAP_NAME, NAMESPACE)
+    key = f"{zone_name}.zone"
+    if cm.data is None or key not in cm.data:
+        raise HTTPException(status_code=404, detail=f"Зона {zone_name} не найдена в primary ConfigMap")
+
+    if not KNOT_INSTANCES_LIST:
+        return ZoneSyncResult(zone=zone_name, synced_secondaries=[], skipped=[])
+
+    synced: list[str] = []
+    skipped: list[str] = []
+    for inst in KNOT_INSTANCES_LIST:
+        role = inst.get("role", "")
+        if role != "secondary":
+            skipped.append(f"{inst.get('id', '')}({role})")
+            continue
+
+        cm_name = inst.get("configmap", "")
+        dep_name = inst.get("deployment", "")
+        if not cm_name or not dep_name:
+            skipped.append(f"{inst.get('id', '')}(no configmap)")
+            continue
+        try:
+            sec_cm = core.read_namespaced_config_map(cm_name, NAMESPACE)
+            if sec_cm.data is None:
+                sec_cm.data = {}
+            sec_conf = sec_cm.data.get("knot.conf", "")
+            if not sec_conf:
+                skipped.append(f"{inst.get('id', '')}(no knot.conf)")
+                continue
+            new_conf = ensure_zone_in_knot_conf_secondary(sec_conf, zone_name)
+            if new_conf == sec_conf:
+                skipped.append(f"{inst.get('id', '')}(already present)")
+                continue
+            sec_cm.data["knot.conf"] = new_conf
+            core.patch_namespaced_config_map(cm_name, NAMESPACE, sec_cm)
+            _trigger_knot_restart(apps, dep_name)
+            synced.append(inst.get("id", ""))
+        except Exception as e:  # noqa: BLE001
+            logger.warning("Sync zone %s to %s failed: %s", zone_name, inst.get("id"), e)
+    return ZoneSyncResult(zone=zone_name, synced_secondaries=synced, skipped=skipped)
 
 
 # ---------------------------------------------------------------------------
