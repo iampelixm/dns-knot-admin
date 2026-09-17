@@ -27,7 +27,7 @@ RUN pip3 install --break-system-packages --no-cache-dir -r requirements.txt
 COPY backend/app ./app
 COPY --from=frontend /frontend/dist /app/static
 
-EXPOSE 8080
+EXPOSE 8080 8443
 
 WORKDIR /app/backend
-CMD ["python3", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080"]
+CMD ["python3", "run.py"]

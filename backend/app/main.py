@@ -42,6 +42,11 @@ DEFAULT_ZONE = os.environ.get("DEFAULT_ZONE", "k3s.local")
 KNOT_AXFR_SECRET_NAME = os.environ.get("KNOT_AXFR_SECRET_NAME", "knot-axfr")
 KNOT_AXFR_SECRET_KEY = os.environ.get("KNOT_AXFR_SECRET_KEY", "axfr.conf")
 
+TLS_CERT_PATH = os.environ.get("TLS_CERT_PATH", "")
+TLS_KEY_PATH = os.environ.get("TLS_KEY_PATH", "")
+
+WEBHOOK_GROUP_NAME = os.environ.get("WEBHOOK_GROUP_NAME") or "dnsadmin.knot.io"
+
 def _load_knot_instances() -> List[Dict[str, Any]]:
     raw = os.environ.get("KNOT_INSTANCES", "").strip()
     if not raw:
@@ -69,7 +74,7 @@ STATIC_DIR = Path(os.environ.get("STATIC_DIR", "")).resolve() if os.environ.get(
 
 bearer_scheme = HTTPBearer(auto_error=False)
 
-app = FastAPI(title="dnsadmin", version="0.4.11")
+app = FastAPI(title="dnsadmin", version="0.4.12")
 
 
 def get_clients():
@@ -368,6 +373,72 @@ def get_current_user(
     if not payload.get("sub"):
         raise HTTPException(status_code=401, detail="Неверный токен")
     return payload
+
+
+class WebhookChallengeRequest(BaseModel):
+    dnsName: str
+    key: str
+    zone: str
+    type: str = "TXT"
+
+
+def _find_zone_for_dns_name(dns_name: str, zones: list[str]) -> str | None:
+    name = dns_name.strip().rstrip(".")
+    for z in sorted(zones, key=len, reverse=True):
+        if name == z or name.endswith("." + z):
+            return z
+    return None
+
+
+def _webhook_present(core: client.CoreV1Api, zone: str, record_name: str, value: str) -> None:
+    cm = core.read_namespaced_config_map(CONFIGMAP_NAME, NAMESPACE)
+    key = f"{zone}.zone"
+    data = dict(cm.data or {})
+    if key not in data:
+        raise HTTPException(status_code=404, detail=f"Zone {zone} not found")
+    try:
+        form = zone_text_to_form(zone, data[key])
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to parse zone: {e}") from e
+    records: list[dict] = form.get("records", [])
+    match = next(
+        (r for r in records if r.get("name") == record_name and r.get("rtype") == "TXT"),
+        None,
+    )
+    rec: Dict[str, Any] = {"name": record_name, "rtype": "TXT", "value": value, "ttl": 60}
+    if match:
+        match["value"] = value
+        match["ttl"] = 60
+    else:
+        records.append(rec)
+    form["records"] = records
+    try:
+        text = form_to_zone_text(zone, form)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to render zone: {e}") from e
+    _apply_zone_update(zone, text)
+
+
+def _webhook_cleanup(core: client.CoreV1Api, zone: str, record_name: str) -> None:
+    cm = core.read_namespaced_config_map(CONFIGMAP_NAME, NAMESPACE)
+    key = f"{zone}.zone"
+    data = dict(cm.data or {})
+    if key not in data:
+        return
+    try:
+        form = zone_text_to_form(zone, data[key])
+    except Exception:
+        return
+    records: list[dict] = form.get("records", [])
+    filtered = [r for r in records if not (r.get("name") == record_name and r.get("rtype") == "TXT")]
+    if len(filtered) == len(records):
+        return
+    form["records"] = filtered
+    try:
+        text = form_to_zone_text(zone, form)
+    except Exception:
+        return
+    _apply_zone_update(zone, text)
 
 
 @app.on_event("startup")
@@ -1481,6 +1552,66 @@ def render_ingress_manifest(
     buf = StringIO()
     yaml.dump(ingress_dict, buf)
     return IngressRenderResponse(yaml=buf.getvalue())
+
+
+# ---------------------------------------------------------------------------
+# cert-manager Webhook endpoints (DNS-01 challenge)
+# cert-manager calls these when using webhook solver type
+# Paths: /{groupName}/present, /{groupName}/cleanup, /{groupName}/healthz
+# APIService paths (with version): /{groupName}/v1/present, etc.
+# ---------------------------------------------------------------------------
+
+
+WEBHOOK_VERSION = "v1"
+
+
+@app.get(f"/{WEBHOOK_GROUP_NAME}/healthz")
+@app.get(f"/{WEBHOOK_GROUP_NAME}/{WEBHOOK_VERSION}/healthz")
+def webhook_healthz():
+    return {"status": "ok"}
+
+
+def _do_present(body: WebhookChallengeRequest):
+    dns_name = body.dnsName.strip().rstrip(".")
+    zone_name = body.zone.strip().rstrip(".")
+    if not dns_name or not zone_name:
+        raise HTTPException(status_code=400, detail="Missing dnsName or zone")
+
+    core, _ = get_clients()
+    cm_data = _read_knot_conf_map(core)
+    zones = sorted(k[:-5] for k in cm_data if k.endswith(".zone"))
+
+    if zone_name not in zones:
+        raise HTTPException(status_code=404, detail=f"Zone {zone_name} not found in ConfigMap")
+
+    txt_name = dns_name.removesuffix("." + zone_name)
+    value = body.key
+    _webhook_present(core, zone_name, txt_name, value)
+    return {"status": "ok"}
+
+
+def _do_cleanup(body: WebhookChallengeRequest):
+    dns_name = body.dnsName.strip().rstrip(".")
+    zone_name = body.zone.strip().rstrip(".")
+    if not dns_name or not zone_name:
+        raise HTTPException(status_code=400, detail="Missing dnsName or zone")
+
+    core, _ = get_clients()
+    txt_name = dns_name.removesuffix("." + zone_name)
+    _webhook_cleanup(core, zone_name, txt_name)
+    return {"status": "ok"}
+
+
+@app.post(f"/{WEBHOOK_GROUP_NAME}/present")
+@app.post(f"/{WEBHOOK_GROUP_NAME}/{WEBHOOK_VERSION}/present")
+def webhook_present(body: WebhookChallengeRequest):
+    return _do_present(body)
+
+
+@app.post(f"/{WEBHOOK_GROUP_NAME}/cleanup")
+@app.post(f"/{WEBHOOK_GROUP_NAME}/{WEBHOOK_VERSION}/cleanup")
+def webhook_cleanup(body: WebhookChallengeRequest):
+    return _do_cleanup(body)
 
 
 def _install_spa(app: FastAPI) -> None:
