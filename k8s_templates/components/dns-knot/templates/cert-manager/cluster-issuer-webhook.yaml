@@ -12,3 +12,4 @@ spec:
       - dns01:
           webhook:
             groupName: {{WEBHOOK_GROUP_NAME}}
+            solverName: dnsadmin

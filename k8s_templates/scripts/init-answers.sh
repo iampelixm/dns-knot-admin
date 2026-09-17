@@ -45,7 +45,7 @@ echo "╚═══════════════════════�
 # ── 1. Registry ────────────────────────────────────────────────────────────────
 echo ""
 info "Registry:"
-answer REGISTRY "Реестр (например registry.summersite.ru)" "registry.summersite.ru"
+answer REGISTRY "Реестр (например registry.summer-site.ru)" "registry.summer-site.ru"
 answer REGISTRY_IMAGE "Путь образа dnsadmin (например dns-knot/dnsadmin)" "dns-knot/dnsadmin"
 answer REGISTRY_PUSH_USER "PUSH-пользователь (запись)"
 answer REGISTRY_PUSH_PASSWORD "PUSH-пароль" "" --required
@@ -119,7 +119,11 @@ answers_save DNS_PRIMARY_ID "$DNS_PRIMARY_ID"
 # ── 4. Ingress ─────────────────────────────────────────────────────────────────
 echo ""
 info "Публикация UI:"
-answer INGRESS_HOST "Hostname для UI (Ingress), напр. dnsadmin.example.com"
+answer_select INGRESS_HOST "На каком домене должен работать UI?" \
+  "summer-site.ru (новый домен)|dnsadmin.summer-site.ru"$'\n'"summersite.ru (старый, отключён)|dnsadmin.summersite.ru"$'\n'"свой вариант|custom"
+if [[ "$INGRESS_HOST" == "custom" ]]; then
+  answer INGRESS_HOST "Hostname для UI (Ingress)"
+fi
 answer_yn INGRESS_TLS "Включить TLS (cert-manager letsencrypt)?" no
 answer INGRESS_CLASS "IngressClass" "traefik"
 answer INGRESS_ENTRYPOINT "Entrypoint" "web"

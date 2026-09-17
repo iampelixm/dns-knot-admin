@@ -263,7 +263,7 @@ JSON Schema для knot.conf.
 {
   "zones": [
     { "name": "k3s.local", "dnssec_signing": true },
-    { "name": "summersite.ru", "dnssec_signing": true },
+    { "name": "summer-site.ru", "dnssec_signing": true },
     { "name": "hoteldev.ru", "dnssec_signing": true },
     { "name": "traveldev.ru", "dnssec_signing": true }
   ]
@@ -403,7 +403,7 @@ JSON Schema для knot.conf.
   "instances": [...],
   "zones": [
     {
-      "zone": "summersite.ru",
+      "zone": "summer-site.ru",
       "servers": [
         { "id": "ns", "serial": 2026091701, "synced": true },
         { "id": "ns2", "serial": 2026091701, "synced": true }
@@ -485,8 +485,8 @@ JSON Schema для knot.conf.
 {
   "server": {
     "listen": "37.230.115.233@53",
-    "identity": "ns.summersite.ru",
-    "nsid": "ns.summersite.ru"
+    "identity": "ns.summer-site.ru",
+    "nsid": "ns.summer-site.ru"
   },
   "log": [
     { "target": "stdout", "any": "info" }
@@ -567,7 +567,7 @@ JSON Schema для knot.conf.
 Для доступа снаружи нужно либо:
 
 1. **Пробросить порт**: `kubectl --context summersite port-forward -n dns-knot svc/dnsadmin 8080:80`
-2. **Сделать Ingress** на поддомен вроде `dnsadmin.hoteldev.ru` или `dnsadmin.dev.summersite.ru`
+2. **Сделать Ingress** на поддомен вроде `dnsadmin.hoteldev.ru` или `dnsadmin.dev.summer-site.ru`
 
 ---
 

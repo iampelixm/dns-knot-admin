@@ -64,6 +64,41 @@ answer() {
   [[ "$store" == "1" ]] && answers_save "$var" "$val"
 }
 
+# Select из списка; записывает выбранное значение.
+#   answer_select VAR "prompt" OPTIONS
+#   OPTIONS — строка вида "label1|value1"$'\n'"label2|value2"...
+answer_select() {
+  local var="$1" prompt="$2" options="$3"
+  local cur="${!var:-}" i=0 line label value choices=()
+  echo ""
+  info "$prompt"
+  while IFS=$'\n' read -r line; do
+    [[ -z "$line" ]] && continue
+    i=$((i + 1))
+    label="${line%%|*}"
+    value="${line#*|}"
+    choices+=("$i")
+    echo "  $i) $label"
+  done <<< "$options"
+  echo ""
+  local selected_idx
+  ask "Выберите номер (1-$i) [по умолч: ${cur:-1}]: "
+  read -r selected_idx
+  selected_idx="${selected_idx:-${cur:-1}}"
+  i=0
+  while IFS=$'\n' read -r line; do
+    [[ -z "$line" ]] && continue
+    i=$((i + 1))
+    [[ "$i" == "$selected_idx" ]] || continue
+    value="${line#*|}"
+    export "$var=$value"
+    answers_save "$var" "$value"
+    info "$var = $value"
+    return 0
+  done <<< "$options"
+  die "Неверный выбор: $selected_idx"
+}
+
 # Вопрос Да/Нет; записывает yes/no.
 answer_yn() {
   local var="$1" prompt="$2" default="${3:-no}"

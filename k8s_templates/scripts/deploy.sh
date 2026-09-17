@@ -63,7 +63,7 @@ else
 fi
 verify_context_access
 
-export REGISTRY="${REGISTRY:-registry.summersite.ru}"
+export REGISTRY="${REGISTRY:-registry.summer-site.ru}"
 export REGISTRY_IMAGE="${REGISTRY_IMAGE:-dns-knot/dnsadmin}"
 export DNSADMIN_IMAGE="${DNSADMIN_IMAGE:-$REGISTRY/$REGISTRY_IMAGE}"
 export NAMESPACE="${NAMESPACE:-dns-knot}"

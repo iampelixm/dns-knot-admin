@@ -15,8 +15,8 @@ zone:
     acl: [axfr-allowed]
     dnssec-signing: on
 
-  - domain: summersite.ru
-    file: /zones/summersite.ru.zone
+  - domain: summer-site.ru
+    file: /zones/summer-site.ru.zone
     acl: [axfr-allowed]
     dnssec-signing: off
 """
@@ -31,7 +31,7 @@ NO_SIGNING_LINE = """zone:
 def test_list_flags() -> None:
     f = list_zone_dnssec_flags(SAMPLE)
     assert f["k3s.local"] is True
-    assert f["summersite.ru"] is False
+    assert f["summer-site.ru"] is False
 
 
 def test_list_default_off_when_line_missing() -> None:
@@ -43,7 +43,7 @@ def test_set_replace_on_to_off() -> None:
     out = set_zone_dnssec_signing(SAMPLE, "k3s.local", False)
     f = list_zone_dnssec_flags(out)
     assert f["k3s.local"] is False
-    assert f["summersite.ru"] is False
+    assert f["summer-site.ru"] is False
 
 
 def test_set_insert_when_missing() -> None:
@@ -54,8 +54,8 @@ def test_set_insert_when_missing() -> None:
 
 
 def test_set_off_to_on_other_unchanged() -> None:
-    out = set_zone_dnssec_signing(SAMPLE, "summersite.ru", True)
-    assert list_zone_dnssec_flags(out)["summersite.ru"] is True
+    out = set_zone_dnssec_signing(SAMPLE, "summer-site.ru", True)
+    assert list_zone_dnssec_flags(out)["summer-site.ru"] is True
     assert list_zone_dnssec_flags(out)["k3s.local"] is True
 
 

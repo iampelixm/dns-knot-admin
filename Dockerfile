@@ -24,6 +24,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 COPY backend/requirements.txt .
 RUN pip3 install --break-system-packages --no-cache-dir -r requirements.txt
 
+COPY backend/run.py .
 COPY backend/app ./app
 COPY --from=frontend /frontend/dist /app/static
 

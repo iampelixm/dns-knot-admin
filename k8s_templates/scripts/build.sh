@@ -61,12 +61,16 @@ export UI_NODE="${UI_NODE:-$DNS_PRIMARY_NODE}"
 export INGRESS_HOST INGRESS_CLASS INGRESS_ENTRYPOINT
 export DEFAULT_ZONE
 export ADMIN_USERNAME ADMIN_PASSWORD JWT_SECRET
-export REGISTRY="${REGISTRY:-registry.summersite.ru}"
+export REGISTRY="${REGISTRY:-registry.summer-site.ru}"
 export DNSADMIN_IMAGE="${DNSADMIN_IMAGE:-$REGISTRY/$REGISTRY_IMAGE}"
 
 # TLS-аннотации
 if [[ "${INGRESS_TLS:-no}" == "yes" ]]; then
-  export INGRESS_TLS_ANNOTATION="cert-manager.io/cluster-issuer: letsencrypt-prod"
+  if [[ "${DNS01:-no}" == "yes" ]]; then
+    export INGRESS_TLS_ANNOTATION="cert-manager.io/cluster-issuer: letsencrypt-dns"
+  else
+    export INGRESS_TLS_ANNOTATION="cert-manager.io/cluster-issuer: letsencrypt-prod"
+  fi
   export INGRESS_TLS="tls:
   - hosts:
       - $INGRESS_HOST

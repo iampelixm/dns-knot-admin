@@ -805,7 +805,7 @@ def get_zones_sync_status(_: Dict[str, Any] = Depends(get_current_user)) -> Dict
     {
       "instances": [...],
       "zones": [{
-        "zone": "summersite.ru",
+        "zone": "summer-site.ru",
         "servers": [{"id": "ns", "serial": 2026091701, "synced": true, ...}],
         "primary_serial": 2026091701
       }]
