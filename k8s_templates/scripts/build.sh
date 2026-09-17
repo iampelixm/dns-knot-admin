@@ -216,6 +216,7 @@ if [[ -n "$ACL_ADDRS" ]]; then
 "
 fi
 if [[ "$DNS01" == "yes" ]]; then
+  CERTMANAGER_TSIG_SECRET="${CERTMANAGER_TSIG_SECRET:-$(openssl rand -base64 32)}"
   AXFR_CONF+="  - id: certmanager-key
     algorithm: hmac-sha256
     secret: ${CERTMANAGER_TSIG_SECRET}
@@ -414,7 +415,7 @@ info "Проверка YAML..."
 if ! python3 -c "import yaml" 2>/dev/null; then
   warn "Модуль PyYAML не установлен — пропускаю валидацию (манифесты можно проверить: kubectl apply --dry-run=client -f)."
 else
-  local fail=0
+  fail=0
   while IFS= read -r -d '' f; do
     if ! python3 -c "import yaml,sys; list(yaml.safe_load_all(open(sys.argv[1])))" "$f" 2>/dev/null; then
       warn "Некорректный YAML: $f"
