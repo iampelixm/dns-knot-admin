@@ -9,6 +9,7 @@ import logging
 import os
 import re
 import subprocess
+import traceback
 from io import StringIO
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -22,6 +23,7 @@ from kubernetes import client, config
 from pydantic import BaseModel, Field, model_validator
 from ruamel.yaml import YAML as _YAML
 
+from app import crypto_utils, db as _db
 from app.axfr_fragment_model import AxfrFragmentModel, parse_axfr_fragment, render_axfr_fragment
 from app.axfr_secret import axfr_diag_public_dict, generate_tsig_yaml_fragment, read_axfr_secret
 from app.dns_probe import knot_probe, query_soa_serial
@@ -32,7 +34,13 @@ from app.knot_editor_model import KnotEditorModel, apply_editor_model, extract_e
 from app.knot_validate import knot_conf_needs_axfr, run_knotc_conf_check
 from app.knot_yaml import load_schema, parse_knot_conf, serialize_knot_conf
 from app.zone_editor import apply_serial_bump, form_to_zone_text, validate_zonefile, zone_text_to_form
+from app.settings import Settings as _Settings
+from app.routers import tsig_keys as _tsig_keys_router
+from app.routers import zones as _zones_router
+from app.routers import dns_servers as _dns_servers_router
+from app.routers import zone_servers as _zone_servers_router
 
+_settings = _Settings()
 logger = logging.getLogger(__name__)
 
 NAMESPACE = os.environ.get("NAMESPACE", "dns-knot")
@@ -75,10 +83,18 @@ STATIC_DIR = Path(os.environ.get("STATIC_DIR", "")).resolve() if os.environ.get(
 bearer_scheme = HTTPBearer(auto_error=False)
 
 app = FastAPI(title="dnsadmin", version="0.4.12")
+app.include_router(_tsig_keys_router.router)
+app.include_router(_zones_router.router)
+app.include_router(_dns_servers_router.router)
+app.include_router(_zone_servers_router.router)
 
 
 def get_clients():
-    config.load_incluster_config()
+    ctx = os.environ.get("KUBECONFIG_CONTEXT")
+    try:
+        config.load_incluster_config()
+    except:
+        config.load_kube_config(context=ctx)
     return client.CoreV1Api(), client.AppsV1Api()
 
 
@@ -416,7 +432,7 @@ def _webhook_present(core: client.CoreV1Api, zone: str, record_name: str, value:
         text = form_to_zone_text(zone, form)
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Failed to render zone: {e}") from e
-    _apply_zone_update(zone, text)
+    _apply_zone_update(zone, text, version_source=None)
 
 
 def _webhook_cleanup(core: client.CoreV1Api, zone: str, record_name: str) -> None:
@@ -438,13 +454,64 @@ def _webhook_cleanup(core: client.CoreV1Api, zone: str, record_name: str) -> Non
         text = form_to_zone_text(zone, form)
     except Exception:
         return
-    _apply_zone_update(zone, text)
+    _apply_zone_update(zone, text, version_source=None)
+
+
+def _parse_axfr_keys(axfr_yaml: str) -> list[dict[str, str]]:
+    try:
+        data = _YAML(typ="safe").load(axfr_yaml)
+    except Exception:
+        return []
+    if not isinstance(data, dict):
+        return []
+    keys_block = data.get("key")
+    if not keys_block or not isinstance(keys_block, list):
+        return []
+    result: list[dict[str, str]] = []
+    for entry in keys_block:
+        kid = entry.get("id", "")
+        alg = entry.get("algorithm", "hmac-sha256")
+        secret = entry.get("secret", "")
+        if kid and secret:
+            result.append({
+                "key_id": kid,
+                "algorithm": alg,
+                "secret_plaintext": secret,
+                "scope": "axfr",
+            })
+    return result
 
 
 @app.on_event("startup")
 async def startup():
+    _db.migrate()
     if not JWT_SECRET:
         logger.error("JWT_SECRET is not set — auth and /api will fail")
+    if _settings.dns_backend == "knot_k8s":
+        try:
+            core, _ = get_clients()
+            cm_data = _read_knot_conf_map(core)
+            zone_files = {k[:-5]: v for k, v in cm_data.items() if k.endswith(".zone")}
+            knot_conf = cm_data.get("knot.conf")
+            tsig_keys_data = None
+            st = read_axfr_secret(
+                core,
+                namespace=NAMESPACE,
+                secret_name=KNOT_AXFR_SECRET_NAME,
+                secret_key=KNOT_AXFR_SECRET_KEY,
+            )
+            if st.code == "ok" and st.content:
+                tsig_keys_data = _parse_axfr_keys(st.content)
+            result = _db.startup_backup(zone_files, knot_conf, tsig_keys_data)
+            if result["status"] == "ok":
+                logger.info(
+                    "startup_backup: zones=%d versions=%d tsig_keys=%d",
+                    result["zones_imported"],
+                    result["versions_imported"],
+                    result["tsig_keys_imported"],
+                )
+        except Exception:
+            logger.warning("startup_backup skipped (not in cluster?):\n%s", traceback.format_exc())
 
 
 @app.get("/health")
@@ -851,25 +918,6 @@ def get_zones_sync_status(_: Dict[str, Any] = Depends(get_current_user)) -> Dict
     return {"instances": KNOT_INSTANCES_LIST, "zones": zones_result}
 
 
-@app.get("/api/zones")
-def list_zones(_: Dict[str, Any] = Depends(get_current_user)) -> Dict[str, Any]:
-    """Список зон из primary ConfigMap.
-
-    Каждая зона с пометкой dnssec_signing (on/off).
-    Первая зона — DEFAULT_ZONE (k3s.local).
-    """
-    core, _ = get_clients()
-    cm = core.read_namespaced_config_map(CONFIGMAP_NAME, NAMESPACE)
-    raw = cm.data or {}
-    keys = sorted([k[:-5] for k in raw.keys() if k.endswith(".zone")])
-    if DEFAULT_ZONE in keys:
-        keys.remove(DEFAULT_ZONE)
-        keys.insert(0, DEFAULT_ZONE)
-    flags = list_zone_dnssec_flags(raw.get("knot.conf") or "")
-    zones = [{"name": z, "dnssec_signing": flags.get(z, False)} for z in keys]
-    return {"zones": zones}
-
-
 @app.post("/api/zones/{zone_name}/validate")
 def validate_zone(
     zone_name: str,
@@ -928,7 +976,7 @@ def save_zone_form(
     return _apply_zone_update(zone_name, text)
 
 
-@app.get("/api/zones/{zone_name}")
+@app.get("/api/zones/{zone_name}/content")
 def get_zone(zone_name: str, _: Dict[str, Any] = Depends(get_current_user)) -> Dict[str, str]:
     """Получить zone-файл из ConfigMap."""
     validate_zone_name(zone_name)
@@ -1073,7 +1121,12 @@ def _sync_zone_to_secondaries(zone_name: str, core: client.CoreV1Api, apps: clie
     return restarted
 
 
-def _apply_zone_update(zone_name: str, content: str) -> Dict[str, str]:
+def _apply_zone_update(
+    zone_name: str,
+    content: str,
+    *,
+    version_source: str | None = "api",
+) -> Dict[str, str]:
     validate_zone_name(zone_name)
     ok, errs = validate_zonefile(zone_name, content)
     if not ok:
@@ -1102,16 +1155,26 @@ def _apply_zone_update(zone_name: str, content: str) -> Dict[str, str]:
 
     ts = _trigger_knot_restart(apps)
 
-    # Синхронизация secondary (на каждом сохранении, а не только для новых зон)
     synced = _sync_zone_to_secondaries(zone_name, core, apps)
 
     notify_sent = _knotc_zone_notify(zone_name)
-    return {
+
+    result: Dict[str, str] = {
         "status": "ok",
         "restarted_at": ts,
         "notify_sent": str(notify_sent).lower(),
         "synced_secondaries": synced,
     }
+
+    if version_source is not None:
+        serial = _db._extract_serial(content)
+        checksum = _db.sha256sum(content)
+        last = _db.get_latest_version(zone_name)
+        if last is None or last["checksum"] != checksum:
+            vid = _db.create_version(zone_name, content, serial, checksum, source=version_source)
+            result["version_id"] = str(vid)
+
+    return result
 
 
 class UpsertRecordBody(BaseModel):
