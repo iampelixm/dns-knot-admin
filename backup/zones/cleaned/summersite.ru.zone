@@ -1,0 +1,91 @@
+$ORIGIN summersite.ru.
+$TTL 300
+
+@ IN SOA ns.summersite.ru. admin.summersite.ru. (
+  1632148008 ; serial
+  3600 ; refresh
+  600 ; retry
+  1209600 ; expire
+  3600 ; minimum
+)
+
+@ IN A 80.87.198.162
+@ IN NS ns.summersite.ru.
+@ IN NS ns1.summersite.ru.
+@ IN MX 10 mx.yandex.net.
+@ IN TXT "v=spf1 redirect=_spf.yandex.net"
+@ IN TXT "yandex-verification: 9322566bb1edd579"
+@ IN TXT "google-site-verification=9l29PGdtrdXEE2YXdwFbJnjkRWiIkhwGk5x3bJpNupo"
+mail._domainkey IN TXT "v=DKIM1; k=rsa; t=s; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDNOTxfPMSxT6jJBxlB3hfPaHRaVAPZkqFOmAor8M2wZuWQb/fhJgLEbRadYch++fP6KYg92JDthfSleszrH7Ax1wtzx+5M1FQuGiNXRLpLFFj2N1xgTPiHLn66o2AR6HZcv4oXjKWGLpNU0TYIbvIIpx3TjVqcun/Z2bfbf06NvwIDAQAB"
+ai IN A 77.106.252.16
+ams IN A 103.54.17.43
+bd IN A 77.106.252.16
+bd IN TXT "v=spf1 ip4:77.106.252.16 mx a -all"
+_dmarc.bd IN TXT "v=DMARC1; p=none; rua=mailto:postmaster@bd.summersite.ru"
+bd-old IN A 77.106.252.16
+bdadmin IN A 77.106.252.16
+bdapi IN A 77.106.252.16
+bess IN A 77.106.252.16
+admin.bnkdt IN A 157.22.195.120
+magner155.bnkdt IN A 157.22.195.120
+magner2000.bnkdt IN A 157.22.195.120
+bo IN A 77.106.252.16
+bpms IN A 77.106.252.16
+bronimtut IN A 82.146.54.108
+bt IN A 77.106.252.16
+buildingapi IN A 77.106.252.16
+buildingapp IN A 77.106.252.16
+cleaningapp IN A 77.106.252.16
+admin.cluster IN A 77.106.252.16
+first.cluster IN A 37.230.115.233
+hello.cluster IN A 176.53.173.136
+master.cluster IN A 77.106.252.16
+stage.cluster IN A 77.106.252.16
+*.stage.cluster IN A 77.106.252.16
+test.cluster IN A 77.106.252.16
+*.test.cluster IN A 77.106.252.16
+coder IN A 77.106.252.16
+dev IN A 77.106.252.16
+*.dev IN A 77.106.252.16
+dgis IN A 77.106.252.16
+dnsadmin IN A 37.230.115.233
+fd24demo IN A 80.87.198.162
+fd24gw IN A 80.87.198.162
+games IN A 77.106.252.16
+gis IN A 77.106.252.16
+git IN A 77.106.252.16
+admin.gov IN A 157.22.195.120
+bankdetektor.gov IN A 157.22.195.120
+bankdetektor.gov IN TXT "v=spf1 a mx ~all"
+platform.gov IN A 157.22.195.120
+bd.platform.gov IN A 157.22.195.120
+storage.gov IN A 157.22.195.121
+govadmin IN A 80.87.198.162
+govadmin2 IN A 77.106.252.16
+grafana IN A 77.106.252.16
+dashboard.k3s IN A 77.106.252.16
+kms IN A 77.106.252.16
+ma IN A 77.106.252.16
+mail IN A 77.106.252.16
+matreshkinn IN A 77.106.252.16
+minio IN A 77.106.252.16
+moopixel IN A 178.250.247.137
+n8n IN A 77.106.252.16
+ns IN A 37.230.115.233
+ns1 IN A 77.106.252.16
+parusresort IN A 80.87.198.162
+plane IN A 77.106.252.16
+plane IN TXT "v=spf1 a -all"
+_dmarc.plane IN TXT "v=DMARC1; p=none; adkim=s; aspf=s"
+registry IN A 77.106.252.16
+srv1 IN A 80.87.198.162
+stage IN A 77.106.252.16
+storage IN A 82.146.49.218
+storage2 IN A 77.106.252.16
+this IN A 77.106.252.16
+tourist-sochi IN A 77.106.252.16
+tracker IN A 77.106.252.16
+travelbroker IN A 157.22.192.24
+www IN A 80.87.198.162
+xlit IN A 82.146.35.90
+

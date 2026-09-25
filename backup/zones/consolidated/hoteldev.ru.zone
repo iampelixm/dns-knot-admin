@@ -1,0 +1,90 @@
+;; Zone dump (Knot DNS 3.4.9)
+hoteldev.ru.        	3600	SOA	ns.hoteldev.ru. admin.hoteldev.ru. 2026060321 3600 600 1209600 3600
+hoteldev.ru.        	3600	A	80.87.198.162
+hoteldev.ru.        	3600	NS	ns.hoteldev.ru.
+hoteldev.ru.        	3600	NS	ns1.hoteldev.ru.
+hoteldev.ru.        	3600	NS	ns2.hoteldev.ru.
+hoteldev.ru.        	3600	DNSKEY	256 3 13 MNBgObKZ4RIwqsZ/Hb0nAnCTlhcSfYL5IPupjq6mF/s4Bbhq9vABiA4PBNC9Fkk2CQ7rLaDPMXnd0mPPzbwj4w==
+hoteldev.ru.        	3600	DNSKEY	257 3 13 XOf0gxGNJxZq9rWmcO5SpqqgQgX172sBiEc+baE5HuP7RCSNK96N+na6FGbKLhl1zbfOOj+0XdmobaE2jZzFog==
+hoteldev.ru.        	0	CDS	25994 13 2 AF998A581C57F4B46963908718B772B287488EB7AD7A6C141DDADCE0886AAA4B
+hoteldev.ru.        	0	CDNSKEY	257 3 13 XOf0gxGNJxZq9rWmcO5SpqqgQgX172sBiEc+baE5HuP7RCSNK96N+na6FGbKLhl1zbfOOj+0XdmobaE2jZzFog==
+admin.hoteldev.ru.  	3600	A	77.106.252.16
+assistant.hoteldev.ru.	3600	A	77.106.252.16
+admin.assistant.hoteldev.ru.	3600	A	77.106.252.16
+amp.assistant.hoteldev.ru.	3600	A	77.106.252.16
+auth.assistant.hoteldev.ru.	300	A	77.106.252.16
+chatwoot.assistant.hoteldev.ru.	3600	A	77.106.252.16
+sso.assistant.hoteldev.ru.	3600	A	77.106.252.16
+dev.hoteldev.ru.    	3600	A	77.106.252.16
+*.dev.hoteldev.ru.  	3600	A	77.106.252.16
+fd24.hoteldev.ru.   	3600	A	80.87.198.162
+*.fd24.hoteldev.ru. 	3600	A	80.87.198.162
+mail.hoteldev.ru.   	3600	A	77.106.252.16
+ns.hoteldev.ru.     	3600	A	37.230.115.233
+ns1.hoteldev.ru.    	3600	A	176.53.173.136
+ns2.hoteldev.ru.    	3600	A	77.106.252.16
+site.hoteldev.ru.   	3600	A	80.87.198.162
+*.site.hoteldev.ru. 	3600	A	80.87.198.162
+;; DNSSEC signatures
+hoteldev.ru.        	3600	RRSIG	A 13 2 3600 20260928055427 20260914042427 36309 hoteldev.ru. fHw8apq2jupeEoM72npTM7QY1CsrAFFFN74utJd54QRZl23qvfGa/hitpDWgglrUZLEdDKb2if2E7U59LmNeLw==
+hoteldev.ru.        	3600	RRSIG	NS 13 2 3600 20260928055427 20260914042427 36309 hoteldev.ru. gQVavjWZ0GIZVemNlGSvNGDu/BN0j0snyuUr+r7b4kY8THQhG0DVqWSmB8m7PxWmzhiuZkQcPe2hpHguxcVjnA==
+hoteldev.ru.        	3600	RRSIG	SOA 13 2 3600 20260930184746 20260916171746 36309 hoteldev.ru. 5CxhKCGXCuDuE+mSfr5jWC/EHmpliT91rVq0TDwL3/WV+viSF3xJvxos6Le5EZtDZ1M4zp2xHzP5NqD2gXRl7w==
+hoteldev.ru.        	3600	RRSIG	NSEC 13 2 3600 20260928055427 20260914042427 36309 hoteldev.ru. WNCSH4+5ab3TmvyxWyJT61UOdoBQAH94oWaua0SjM9Pn536H9m+L/bDHdsvkZMU6xjjXRDAU8iL2Jl3tEvDNwA==
+hoteldev.ru.        	3600	RRSIG	DNSKEY 13 2 3600 20260928075427 20260914062427 25994 hoteldev.ru. JgfLuW4F/L5lfoNFj5NTqS1W1DpHvWeKe7K+YDesO4QjmkEt7YKOjG52NAK2iKub68OZxD628KvlGwwM1kxCbA==
+hoteldev.ru.        	0	RRSIG	CDS 13 2 0 20260930184746 20260916171746 25994 hoteldev.ru. yXe4Cr58X81ynlcEtQqSIrgaRS4p3De9FzZJXUFwT1u06OX73Q93rVY/ynWouf75tn/SMzkkvLO01YIVONbtgQ==
+hoteldev.ru.        	0	RRSIG	CDNSKEY 13 2 0 20260930184746 20260916171746 25994 hoteldev.ru. M4mAr+vPhig6QvVyth3LS/Zex3ai7hU34H407IK8Q/uuFg/NiyuWi7reytuvhgZsFRZjBMiUedvw8FJ5hqfo8g==
+admin.hoteldev.ru.  	3600	RRSIG	A 13 3 3600 20260928055427 20260914042427 36309 hoteldev.ru. FQrlyqkGbbLhZG6n+94O0qi8xG6OtNOaymmveVHQBz++wVyrmPi78Loi8G3DU0HOmGAVZW6i1Boyjmbq958pEw==
+admin.hoteldev.ru.  	3600	RRSIG	NSEC 13 3 3600 20260928055427 20260914042427 36309 hoteldev.ru. BiLALZS//Qo4Nl7Hzof5H5gbdTMfFXh5TjvF3Ono5RiS38EY2QCRuSOfHlVWaQY88E1wXIyxG1xnYcBX3oPczQ==
+assistant.hoteldev.ru.	3600	RRSIG	A 13 3 3600 20260928055427 20260914042427 36309 hoteldev.ru. Je+BO+8DqHixwmAPSMJ6YSxVnwsYuarYJLf29Fy0LY+rCV1hYp+8BTOeg8N4VZxY2envqU/gf+ou98Z1abkMkw==
+assistant.hoteldev.ru.	3600	RRSIG	NSEC 13 3 3600 20260928055427 20260914042427 36309 hoteldev.ru. IdcOHQJbqFynaSCQTFTLBubU2saGLxbXuLVkTU3+1nIdbzxQj64PfbhCrTu2uVI/meDFTgmo8b8YO3nX/os8Uw==
+admin.assistant.hoteldev.ru.	3600	RRSIG	A 13 4 3600 20260928055427 20260914042427 36309 hoteldev.ru. WqxeGzb/iBPJ+FTM9VxOUzJBnV5j8QTftYdACztkjG6O4iqdA5w+IfKKVy2rvWEMFXZvSa+cfKKGzyHbgmjq9Q==
+admin.assistant.hoteldev.ru.	3600	RRSIG	NSEC 13 4 3600 20260928055427 20260914042427 36309 hoteldev.ru. dbxq/rYffqMSATJoNZVY8ftbkOMgaiXFF+T+7Egwq8eKl+dDjgwUpYXK+fz5I3bUAYMMGr3ofWpMD9vQX9ivWQ==
+amp.assistant.hoteldev.ru.	3600	RRSIG	A 13 4 3600 20260928055427 20260914042427 36309 hoteldev.ru. Ti08R8Fcs6wxjV/aZE3EwWFpr7ud3fBePj/m0YRgQH9EMFXNu7if2SWnmtPaJY29+WoFxUN41QWFc3reWuEqMQ==
+amp.assistant.hoteldev.ru.	3600	RRSIG	NSEC 13 4 3600 20260928055427 20260914042427 36309 hoteldev.ru. LZeaBVnbj+MamEW4s9fa7cVXkiKkO7vX1bE2qHA8RUD/sgDhnVhdn5PwiXM7YzoCN95h09zkaVl37D/yJuNj6A==
+auth.assistant.hoteldev.ru.	300	RRSIG	A 13 4 300 20260928055427 20260914042427 36309 hoteldev.ru. ntBglAvICxk5YhKx4cbMO4VCdnSJBzdp5FkTuX8CqKARQjd9NhQpkxb5kO2ohh6GSfjua4zi/cuBkITegrD3Xg==
+auth.assistant.hoteldev.ru.	3600	RRSIG	NSEC 13 4 3600 20260928055427 20260914042427 36309 hoteldev.ru. FuYv+1IG++5WR1XG1H/koly3d9/F7cqYqgi3VYEX3z3J+i0JbzbOUTzIuzo9VHsh1nn5vSprE5yiKizd2ORdqg==
+chatwoot.assistant.hoteldev.ru.	3600	RRSIG	A 13 4 3600 20260928055427 20260914042427 36309 hoteldev.ru. txCoz37fU6xYAbUL/baVRigUKTpVuR6h+dYJpRyLHlbuw3zTZYVRC/CPsf7+o9l0MBb4Vt36KqPCzZr563AG9A==
+chatwoot.assistant.hoteldev.ru.	3600	RRSIG	NSEC 13 4 3600 20260928055427 20260914042427 36309 hoteldev.ru. YbC2b6qHP3tMegyR4M18/vH8GUayClJEUi3Mda5vvbf80g1KAmKz5Fa/iDbYnV/UuV6r6Y1O2dO5qdGRPRLWxQ==
+sso.assistant.hoteldev.ru.	3600	RRSIG	A 13 4 3600 20260928055427 20260914042427 36309 hoteldev.ru. 3nKZECKTm9/ntfwpxFXOFMJ8qUBirOfwGcROeGke74DEnUGk0xvPnGGuYn8nlhtyM9UINdfc7JO2EA9cqvwXXA==
+sso.assistant.hoteldev.ru.	3600	RRSIG	NSEC 13 4 3600 20260928055427 20260914042427 36309 hoteldev.ru. OawrsytAYHR1K9HWROLORaY6XQO41bQFlY8EVdGFDKlR6m+fV4d5wf2icBz/ml/k10KZcwxUQj8xbbuZPUzxcQ==
+dev.hoteldev.ru.    	3600	RRSIG	A 13 3 3600 20260928055427 20260914042427 36309 hoteldev.ru. dZdJCigQkHpEPFHFTIl0Pk+/jT3cPW+NE5Mfvu99yIHD8w1BlGcAJe0lvOGbvPt7nwUdE7b6or+JWBswlRpxiw==
+dev.hoteldev.ru.    	3600	RRSIG	NSEC 13 3 3600 20260928055427 20260914042427 36309 hoteldev.ru. 9c8dboHArdcb36uTuUGEpYZEttcLZ0ARInrwWWSrCBFN+x4egc2qFyUGkFXzn71Blltl91dWw5Exq4N90VxRwg==
+*.dev.hoteldev.ru.  	3600	RRSIG	A 13 3 3600 20260928055427 20260914042427 36309 hoteldev.ru. Lv2BY15Zy69R0S7By5C9W8j5EP8A9XkUE5//ALTO50TgPOxq/Ajg5JR0o6Ca7cugf6D9tO7N+YDK7XTT4NYsJg==
+*.dev.hoteldev.ru.  	3600	RRSIG	NSEC 13 3 3600 20260928055427 20260914042427 36309 hoteldev.ru. zyvbsD3jnkz941sCx5C8j00lrj964d15F7j8Jm/Pj+95+Bg1NGpMNYWOuORwB1GfWKftIc2ZVzyQhXDzN3LRKw==
+fd24.hoteldev.ru.   	3600	RRSIG	A 13 3 3600 20260928055427 20260914042427 36309 hoteldev.ru. K1Ze4oiZlVvsENsG/XcoyOF5QfZ0FkxLRa1Nhg6NggYJKtYSPFRINa9upoh6RAl/6RPnewcM2kxBFljDhYNoQw==
+fd24.hoteldev.ru.   	3600	RRSIG	NSEC 13 3 3600 20260928055427 20260914042427 36309 hoteldev.ru. NYnkPZwHNN5WbRV3efWFw/iLu8l6K0ho8fJcxUfbNE4viZ7S1pBK21RbS9/1TeN940n89f8VLbDcdsC1P4yZzA==
+*.fd24.hoteldev.ru. 	3600	RRSIG	A 13 3 3600 20260928055427 20260914042427 36309 hoteldev.ru. h+EtJ47bwS+Aakhz2ordExR7Sd/PpmgSQVPlZO512M7PkIU+lES5B7JIP4yYbBJkkb9aYebruJti/qZD2dXUkQ==
+*.fd24.hoteldev.ru. 	3600	RRSIG	NSEC 13 3 3600 20260928055427 20260914042427 36309 hoteldev.ru. 5P0ys+vppFhjaNjpLjHKuY4LckYEFfXWgYPerr0J5/HT7eeSE7kRYwJb1p52yMRwyOd4CFWUPnLEDiPvD8Ytmw==
+mail.hoteldev.ru.   	3600	RRSIG	A 13 3 3600 20260928055427 20260914042427 36309 hoteldev.ru. psIXrlYXjr5FNzFiMa1FJK/muYcYObrqyxBWf9UH2+/hSQJw3YacyanesXvNhvAAvWsRFsSTTLfgJ3WDeL7RWw==
+mail.hoteldev.ru.   	3600	RRSIG	NSEC 13 3 3600 20260928055427 20260914042427 36309 hoteldev.ru. FQyLm1sdX8rlmc+UqLHAVP4bssdTvgA+4qNWpAAMMv7Mn9dPZ7GOf0QopAr0/BcNh/hTuCtdksj0xFQB+YpwOQ==
+ns.hoteldev.ru.     	3600	RRSIG	A 13 3 3600 20260928055427 20260914042427 36309 hoteldev.ru. 25s0kpChLVunf8OV4BbMwyagUkfhOzRCo/Xl0wMIPmkn3P1E2gBXJUGTi0EY0yAPNlarWjJj+Xe1+xlarde5RQ==
+ns.hoteldev.ru.     	3600	RRSIG	NSEC 13 3 3600 20260928055427 20260914042427 36309 hoteldev.ru. /bYNidionLBPyeNZC1T+jQFTPTOFLQQnn95ChEo56neLptBOel3rI/MgdW38o2QvQZsIjyBfV4U1+myWsHIy9Q==
+ns1.hoteldev.ru.    	3600	RRSIG	A 13 3 3600 20260928055427 20260914042427 36309 hoteldev.ru. 2oGT3kzkk32xHQrNek9a4z6Y7uvhEQZqEi7ExQ2YM+LEaibaeZzHjEESNf9VPpXRwstAabTE8KgCP8SJXYiMbg==
+ns1.hoteldev.ru.    	3600	RRSIG	NSEC 13 3 3600 20260928055427 20260914042427 36309 hoteldev.ru. JKyJ7IvJGKp7qQeq7smwXwDxEuM63QIYIV8jRFh3GqCUVf5IT2fncqonkG0/U5gVOTtD471ZqmZS3IB/OgUnhw==
+ns2.hoteldev.ru.    	3600	RRSIG	A 13 3 3600 20260928055427 20260914042427 36309 hoteldev.ru. 0tG5lDopFqXRHpJiuK3oXh/KTVCZTiMtYvK4s2fI1UH1tKsck4yZ1V/7W5/Sgl1fNdJd0u78Tt+VfTKd5oXQZQ==
+ns2.hoteldev.ru.    	3600	RRSIG	NSEC 13 3 3600 20260928055427 20260914042427 36309 hoteldev.ru. QtKXpFXEkt2d5n7SvBH6F/Dkh4+DB4g1ePOYThnSV7F2ybpCsuiW5dRBMjOD7mV2C4vS+MhQoEpOUjgk6a4+4Q==
+site.hoteldev.ru.   	3600	RRSIG	A 13 3 3600 20260928055427 20260914042427 36309 hoteldev.ru. MOy3UzUBbhc4XwLCKRiDk3wVt8exgVR01M3KmNLsTWHppYOQ1vE5WKbxLfDyUjvGKU3JIFxKgs0CS7OENnWTqA==
+site.hoteldev.ru.   	3600	RRSIG	NSEC 13 3 3600 20260928055427 20260914042427 36309 hoteldev.ru. km4267fKaZI+3JgSEwGJXG1iFfvArHBvYOCAOXKZUWw/b3NdtOyIR053R6NzsiRVEYbK9TN1/FWzz6dUIMNUFA==
+*.site.hoteldev.ru. 	3600	RRSIG	A 13 3 3600 20260928055427 20260914042427 36309 hoteldev.ru. 8YrL+Xsy8EeYqmSaRGpdMBb9EzX01xmjrnhSlt6mIr8UDB7XKaOM5Bz0+V0HjBX05B+wUfquk51AFuZrpPK8kw==
+*.site.hoteldev.ru. 	3600	RRSIG	NSEC 13 3 3600 20260928055427 20260914042427 36309 hoteldev.ru. lf4/dnohGQS8MNy/xlUiE0XByJ3/XR7VQ4X+Qv0bXW9W5bb1fb3S5bornGVDZx/olnVgk0YecnSeJMkfwkPhHg==
+;; DNSSEC NSEC chain
+hoteldev.ru.        	3600	NSEC	admin.hoteldev.ru. A NS SOA RRSIG NSEC DNSKEY CDS CDNSKEY
+admin.hoteldev.ru.  	3600	NSEC	assistant.hoteldev.ru. A RRSIG NSEC
+assistant.hoteldev.ru.	3600	NSEC	admin.assistant.hoteldev.ru. A RRSIG NSEC
+admin.assistant.hoteldev.ru.	3600	NSEC	amp.assistant.hoteldev.ru. A RRSIG NSEC
+amp.assistant.hoteldev.ru.	3600	NSEC	auth.assistant.hoteldev.ru. A RRSIG NSEC
+auth.assistant.hoteldev.ru.	3600	NSEC	chatwoot.assistant.hoteldev.ru. A RRSIG NSEC
+chatwoot.assistant.hoteldev.ru.	3600	NSEC	sso.assistant.hoteldev.ru. A RRSIG NSEC
+sso.assistant.hoteldev.ru.	3600	NSEC	dev.hoteldev.ru. A RRSIG NSEC
+dev.hoteldev.ru.    	3600	NSEC	*.dev.hoteldev.ru. A RRSIG NSEC
+*.dev.hoteldev.ru.  	3600	NSEC	fd24.hoteldev.ru. A RRSIG NSEC
+fd24.hoteldev.ru.   	3600	NSEC	*.fd24.hoteldev.ru. A RRSIG NSEC
+*.fd24.hoteldev.ru. 	3600	NSEC	mail.hoteldev.ru. A RRSIG NSEC
+mail.hoteldev.ru.   	3600	NSEC	ns.hoteldev.ru. A RRSIG NSEC
+ns.hoteldev.ru.     	3600	NSEC	ns1.hoteldev.ru. A RRSIG NSEC
+ns1.hoteldev.ru.    	3600	NSEC	ns2.hoteldev.ru. A RRSIG NSEC
+ns2.hoteldev.ru.    	3600	NSEC	site.hoteldev.ru. A RRSIG NSEC
+site.hoteldev.ru.   	3600	NSEC	*.site.hoteldev.ru. A RRSIG NSEC
+*.site.hoteldev.ru. 	3600	NSEC	hoteldev.ru. A RRSIG NSEC
+;; Written 85 records
+;; Time 2026-09-17 19:51:10 UTC

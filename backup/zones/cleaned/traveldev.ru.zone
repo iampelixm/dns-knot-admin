@@ -1,0 +1,24 @@
+$ORIGIN traveldev.ru.
+$TTL 3600
+
+@ IN SOA ns.traveldev.ru. admin.traveldev.ru. (
+  2026060318 ; serial
+  3600 ; refresh
+  600 ; retry
+  1209600 ; expire
+  3600 ; minimum
+)
+
+@ IN A 80.87.198.162
+@ IN NS ns.traveldev.ru.
+@ IN NS ns1.traveldev.ru.
+@ IN NS ns2.traveldev.ru.
+broker IN A 37.230.115.233
+admin.broker IN A 37.230.115.233
+partner.broker IN A 37.230.115.233
+stage.broker IN A 77.106.252.16
+supplier.broker IN A 37.230.115.233
+ns IN A 37.230.115.233
+ns1 IN A 176.53.173.136
+ns2 IN A 77.106.252.16
+

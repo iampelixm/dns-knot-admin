@@ -1,0 +1,41 @@
+;; Zone dump (Knot DNS 3.4.9)
+drovosek-sochi.ru.  	3600	SOA	ns.drovosek-sochi.ru. admin.drovosek-sochi.ru. 1602242779 3600 600 1209600 3600
+drovosek-sochi.ru.  	3600	A	80.87.198.162
+drovosek-sochi.ru.  	3600	NS	ns.drovosek-sochi.ru.
+drovosek-sochi.ru.  	3600	NS	ns4-l2.nic.ru.
+drovosek-sochi.ru.  	3600	NS	ns8-l2.nic.ru.
+drovosek-sochi.ru.  	3600	MX	10 mx.yandex.net.
+drovosek-sochi.ru.  	3600	TXT	"v=spf1 redirect=_spf.yandex.net +A"
+drovosek-sochi.ru.  	3600	TXT	"yandex-verification: 74fbdd0a4a10a07e"
+drovosek-sochi.ru.  	3600	TXT	"wmail-verification: ae978fe322c940cfd045664013736fd9"
+drovosek-sochi.ru.  	3600	TXT	"google-site-verification=6CEmHhmpw8b7dbVJUAa0HIKLtsat82uMQoW4TtpEiOc"
+drovosek-sochi.ru.  	3600	DNSKEY	256 3 13 NQcxFtRpAgtc/nO59jxOA6eBpyoGUKMDVHladmSbbl7BKXMd9a2M4PQIhkiYTatXkfqRggLrn8pvZ4ZQnuimvg==
+drovosek-sochi.ru.  	3600	DNSKEY	257 3 13 9F65HaYqGM3QIT9t8LE81UO2Cd6cFc5iHVfIwEl6JXO+vn4ZA30JuPGVNtx3uJw5SKh8AWCzp4N+oF5SRHe4dw==
+drovosek-sochi.ru.  	0	CDS	59358 13 2 CDC26E8D27771187413A650EB408FC3D3D13ACAC867930E4C03FC86AEC9E6BDF
+drovosek-sochi.ru.  	0	CDNSKEY	257 3 13 9F65HaYqGM3QIT9t8LE81UO2Cd6cFc5iHVfIwEl6JXO+vn4ZA30JuPGVNtx3uJw5SKh8AWCzp4N+oF5SRHe4dw==
+ns.drovosek-sochi.ru.	3600	A	82.146.35.90
+storage.drovosek-sochi.ru.	3600	A	82.146.49.218
+www.drovosek-sochi.ru.	3600	A	80.87.198.162
+;; DNSSEC signatures
+drovosek-sochi.ru.  	3600	RRSIG	A 13 2 3600 20260928060425 20260914043425 17887 drovosek-sochi.ru. EcA21AKKcTm38/w5Nnij3kwAKAgW3i+cN/8/msNstFITIHORm+8rN+JpytjgJkIQtKoJfdxILKQyNf2+uyRlrw==
+drovosek-sochi.ru.  	3600	RRSIG	NS 13 2 3600 20260928060425 20260914043425 17887 drovosek-sochi.ru. oFAf010qE4aWxg9o8eE02YrdqN2IQ2OXVM2Ai5dETuGF5phc3RWU5zPQDe2vxQb4hQTX6oKHEJIsiwwV+scKbQ==
+drovosek-sochi.ru.  	3600	RRSIG	SOA 13 2 3600 20260930184746 20260916171746 17887 drovosek-sochi.ru. NKEiwf1szffAUYG+CulcXr/Ijl7KkULaynD1eJMZ8fgRxfXGaOKZpxda1JOwnjdCZzMSOYnDKSwsY8clhK5KRA==
+drovosek-sochi.ru.  	3600	RRSIG	MX 13 2 3600 20260928060425 20260914043425 17887 drovosek-sochi.ru. CY3CSS/6NuOo2khEjxpKt4Sl9fVgDg/3kyrUlEyWjDpg+/dwKoTVJjRC2ontqC4NJSZBMI9pUbrq9ZNmsv2btw==
+drovosek-sochi.ru.  	3600	RRSIG	TXT 13 2 3600 20260928060425 20260914043425 17887 drovosek-sochi.ru. LVflG69dGME0bNGKz1jJWE/HCanw2uHujelot+3f/duLcZFYOT0vIqIw4dOpQGZBKUZioBE6GlhGxc5j83DNeg==
+drovosek-sochi.ru.  	3600	RRSIG	NSEC 13 2 3600 20260928060425 20260914043425 17887 drovosek-sochi.ru. u7vabAvrytcxoZhqmZM/DzzxurNdsEh6MktJGY4/eHdcrV+HQ/rhRBzzb4dPNs+z3R08ClsL8veaFdChXczNrQ==
+drovosek-sochi.ru.  	3600	RRSIG	DNSKEY 13 2 3600 20260928080425 20260914063425 59358 drovosek-sochi.ru. plm+Ks8tP4ZaGBdjeAnyQoMS1F46vLgfF89imk2TVnliyWurZ8nxQ8IzmYXKgvvx1WX7zi9p+ZRHjt8eCHuiFA==
+drovosek-sochi.ru.  	0	RRSIG	CDS 13 2 0 20260930184746 20260916171746 59358 drovosek-sochi.ru. Vw8OYjDjNDCA0dL5/rG/zWlySXCfP0laBxJoNV3sMAIsy8w713L06vjzh/AarVa/tmcfZ44GSd3Ucv57eKQaDQ==
+drovosek-sochi.ru.  	0	RRSIG	CDNSKEY 13 2 0 20260930184746 20260916171746 59358 drovosek-sochi.ru. mHH9wUYDE3VOsg14GngFda2JaFgyVbMQO86C9WS+/4ovVXMUiQjB3aU7LCQe1LzsPjs4WRdK01SKhgRuZkRU3w==
+ns.drovosek-sochi.ru.	3600	RRSIG	A 13 3 3600 20260928060425 20260914043425 17887 drovosek-sochi.ru. BLLVgLGMdWvhthHPLq0pUu/ZE0ASXKTfM+PLYffCZ97AsoIRZ205LxMWCkvoBzmfFai7YexACi81gFxvStBErA==
+ns.drovosek-sochi.ru.	3600	RRSIG	NSEC 13 3 3600 20260928060425 20260914043425 17887 drovosek-sochi.ru. 4+p5Mnjua1yJsZIwSNWQinJuxJns2VP9ZV39wRdKatld11x7nQJA+kXY1mWAzh3amLyuGZtPnZvxsmOeP43auA==
+storage.drovosek-sochi.ru.	3600	RRSIG	A 13 3 3600 20260928060425 20260914043425 17887 drovosek-sochi.ru. DbFey9wZ61tyiguBZSE79/yTTmPqa2mh0RoIDPR9srwKA2N9oA2rez2jOrCQa3m6Awm1vPyJ2PiBR3XiOGtLig==
+storage.drovosek-sochi.ru.	3600	RRSIG	NSEC 13 3 3600 20260928060425 20260914043425 17887 drovosek-sochi.ru. HyCFewMlLzBsyjPtHZzK4aSfxgTC6wxHPqF0+8RQkFwY2b7iCBG3a8KHlbPSB8XNV36UN3LodXP/1fohSZdASw==
+www.drovosek-sochi.ru.	3600	RRSIG	A 13 3 3600 20260928060425 20260914043425 17887 drovosek-sochi.ru. iTjqTJKxlAaxlyEdAlHwChj72oLwHWBywXKjWY1foyYqKY1APxExTZKQg7RKqqBj35VoDdOqz11Xa3YoFcDpQQ==
+www.drovosek-sochi.ru.	3600	RRSIG	NSEC 13 3 3600 20260928060425 20260914043425 17887 drovosek-sochi.ru. f5tTXGTE9Ax40m8oDAdKwSuHirTkT1xSCPEKXzVcOLZA0ICo7zqF4sxy1fvP7miTHRprv68wol1gdxvBirkwzw==
+;; DNSSEC NSEC chain
+drovosek-sochi.ru.  	3600	NSEC	ns.drovosek-sochi.ru. A NS SOA MX TXT RRSIG NSEC DNSKEY CDS CDNSKEY
+ns.drovosek-sochi.ru.	3600	NSEC	storage.drovosek-sochi.ru. A RRSIG NSEC
+storage.drovosek-sochi.ru.	3600	NSEC	www.drovosek-sochi.ru. A RRSIG NSEC
+www.drovosek-sochi.ru.	3600	NSEC	drovosek-sochi.ru. A RRSIG NSEC
+;; Written 36 records
+;; Time 2026-09-17 19:51:10 UTC

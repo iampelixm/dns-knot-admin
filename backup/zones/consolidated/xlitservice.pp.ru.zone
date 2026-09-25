@@ -1,0 +1,57 @@
+;; Zone dump (Knot DNS 3.4.9)
+xlitservice.pp.ru.  	38400	SOA	ns.xlitservice.pp.ru. a\.semenov.xlitservice.ru. 1459581659 10800 3600 604800 38400
+xlitservice.pp.ru.  	38400	A	82.146.35.90
+xlitservice.pp.ru.  	38400	NS	ns.xlitservice.pp.ru.
+xlitservice.pp.ru.  	38400	NS	ns4-l2.nic.ru.
+xlitservice.pp.ru.  	38400	NS	ns8-l2.nic.ru.
+xlitservice.pp.ru.  	38400	MX	20 mx.xlitservice.pp.ru.
+xlitservice.pp.ru.  	38400	TXT	"yandex-verification: 56bdefa28de73ccf"
+60.177.156.185.xlitservice.pp.ru. 38400	PTR	mx.hotel.xlitservice.pp.ru.xlitservice.pp.ru.
+185.156.177.60.xlitservice.pp.ru. 38400	PTR	mx.hotel.xlitservice.pp.ru.xlitservice.pp.ru.
+acc.xlitservice.pp.ru.	38400	A	77.106.252.16
+am.xlitservice.pp.ru.	38400	A	178.210.72.166
+dav.xlitservice.pp.ru.	38400	A	77.106.252.16
+dev.xlitservice.pp.ru.	38400	A	83.220.168.168
+*.dev.xlitservice.pp.ru.	38400	A	83.220.168.168
+govadmin.dev.xlitservice.pp.ru.	38400	A	83.220.168.168
+storage.dev.xlitservice.pp.ru.	38400	A	82.146.49.218
+disc.xlitservice.pp.ru.	38400	A	82.146.35.90
+ftp.xlitservice.pp.ru.	38400	A	82.146.35.90
+hotel.xlitservice.pp.ru.	38400	A	80.87.198.162
+hotel.xlitservice.pp.ru.	38400	MX	20 mx.hotel.xlitservice.pp.ru.
+hotel.xlitservice.pp.ru.	38400	TXT	"v=spf1 a mx ~all"
+_dmarc.hotel.xlitservice.pp.ru.	38400	TXT	"v=DMARC1; p=none"
+mail._domainkey.hotel.xlitservice.pp.ru. 38400	TXT	"v=DKIM1; h=sha256; k=rsa; " "p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAziSIgoW1s6P6uAHOb5QByeLvwpYpP4eQRhEStDyO9mjppkfc+DOXNdBv7qnGDNeX+bhmaVO7kRbMufHleJK3+qSV31wgtLCcvh9DCdRphxPNsK5rZUCERGVL+w+RGTFzE7ZVUVbw5Ff5CyWIgAS3rBzDOSsOlP9kUdBGaaBdz+eS87XhGchGJIp9jrAihTvhOccAPBqFS5BZQ4" "b2UBGw6FL4355x+kQX84bej+eK/BnkTVsi5wuVuSRwygpuC06elvMlx5xDap/pHDwM8w1hedq/ALbYGT177NNlxl0kvwJXL/9cRIaf9uU0qJ5fC1wV7aU96IdtPknSf+8PBjRD3QIDAQAB"
+mx.hotel.xlitservice.pp.ru.	38400	A	185.156.177.60
+mx.hotel.xlitservice.pp.ru.	38400	MX	20 mx.hotel.xlitservice.pp.ru.
+mx.hotel.xlitservice.pp.ru.	38400	TXT	"v=spf1 a mx ~all"
+_dmarc.mx.hotel.xlitservice.pp.ru. 38400	TXT	"v=DMARC1; p=none"
+imap.xlitservice.pp.ru.	38400	A	82.146.35.90
+ksc.xlitservice.pp.ru.	38400	A	77.106.252.16
+ldap.xlitservice.pp.ru.	38400	A	82.146.35.90
+mail.xlitservice.pp.ru.	38400	A	82.146.35.90
+moosend.xlitservice.pp.ru.	38400	A	77.106.252.16
+msg.xlitservice.pp.ru.	38400	A	82.146.35.90
+mx.xlitservice.pp.ru.	38400	A	82.146.35.90
+newmail.xlitservice.pp.ru.	38400	A	82.146.52.37
+ns.xlitservice.pp.ru.	38400	A	82.146.35.90
+openvpn.xlitservice.pp.ru.	38400	A	77.106.252.16
+phpmyadmin.xlitservice.pp.ru.	38400	A	82.146.35.90
+srv1.prod.xlitservice.pp.ru.	38400	A	80.87.198.162
+srv2.prod.xlitservice.pp.ru.	38400	A	80.87.198.162
+srv3.prod.xlitservice.pp.ru.	38400	A	80.87.198.162
+srv4.prod.xlitservice.pp.ru.	38400	A	80.87.198.162
+srv5.prod.xlitservice.pp.ru.	38400	A	80.87.198.162
+radius.xlitservice.pp.ru.	38400	A	77.106.252.16
+rms.xlitservice.pp.ru.	38400	A	77.106.252.16
+rmsnew.xlitservice.pp.ru.	38400	A	77.106.252.16
+mx.hotel.xlitservice.pp.ru.xlitservice.pp.ru. 38400	A	185.156.177.60
+servicedesk.xlitservice.pp.ru.	38400	A	82.146.35.90
+smtp.xlitservice.pp.ru.	38400	A	82.146.35.90
+t.xlitservice.pp.ru.	38400	A	77.106.252.16
+tsum.xlitservice.pp.ru.	38400	A	82.146.35.90
+v.xlitservice.pp.ru.	38400	A	82.146.35.90
+xbmc.xlitservice.pp.ru.	38400	A	77.106.252.16
+xbmcvpn.xlitservice.pp.ru.	38400	A	77.106.252.16
+;; Written 54 records
+;; Time 2026-09-17 19:51:10 UTC

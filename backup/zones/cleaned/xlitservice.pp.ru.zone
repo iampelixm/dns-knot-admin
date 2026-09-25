@@ -1,0 +1,60 @@
+$ORIGIN xlitservice.pp.ru.
+$TTL 38400
+
+@ IN SOA ns.xlitservice.pp.ru. a\.semenov.xlitservice.ru. (
+  1459581659 ; serial
+  10800 ; refresh
+  3600 ; retry
+  604800 ; expire
+  38400 ; minimum
+)
+
+@ IN A 82.146.35.90
+@ IN NS ns.xlitservice.pp.ru.
+@ IN NS ns4-l2.nic.ru.
+@ IN NS ns8-l2.nic.ru.
+@ IN MX 20 mx.xlitservice.pp.ru.
+@ IN TXT "yandex-verification: 56bdefa28de73ccf"
+acc IN A 77.106.252.16
+am IN A 178.210.72.166
+dav IN A 77.106.252.16
+dev IN A 83.220.168.168
+*.dev IN A 83.220.168.168
+govadmin.dev IN A 83.220.168.168
+storage.dev IN A 82.146.49.218
+disc IN A 82.146.35.90
+ftp IN A 82.146.35.90
+hotel IN A 80.87.198.162
+hotel IN MX 20 mx.hotel.xlitservice.pp.ru.
+hotel IN TXT "v=spf1 a mx ~all"
+_dmarc.hotel IN TXT "v=DMARC1; p=none"
+mx.hotel IN A 185.156.177.60
+mx.hotel IN MX 20 mx.hotel.xlitservice.pp.ru.
+mx.hotel IN TXT "v=spf1 a mx ~all"
+imap IN A 82.146.35.90
+ksc IN A 77.106.252.16
+ldap IN A 82.146.35.90
+mail IN A 82.146.35.90
+moosend IN A 77.106.252.16
+msg IN A 82.146.35.90
+mx IN A 82.146.35.90
+newmail IN A 82.146.52.37
+ns IN A 82.146.35.90
+openvpn IN A 77.106.252.16
+phpmyadmin IN A 82.146.35.90
+srv1.prod IN A 80.87.198.162
+srv2.prod IN A 80.87.198.162
+srv3.prod IN A 80.87.198.162
+srv4.prod IN A 80.87.198.162
+srv5.prod IN A 80.87.198.162
+radius IN A 77.106.252.16
+rms IN A 77.106.252.16
+rmsnew IN A 77.106.252.16
+servicedesk IN A 82.146.35.90
+smtp IN A 82.146.35.90
+t IN A 77.106.252.16
+tsum IN A 82.146.35.90
+v IN A 82.146.35.90
+xbmc IN A 77.106.252.16
+xbmcvpn IN A 77.106.252.16
+

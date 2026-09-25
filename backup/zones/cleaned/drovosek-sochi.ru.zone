@@ -1,0 +1,24 @@
+$ORIGIN drovosek-sochi.ru.
+$TTL 3600
+
+@ IN SOA ns.drovosek-sochi.ru. admin.drovosek-sochi.ru. (
+  1602242779 ; serial
+  3600 ; refresh
+  600 ; retry
+  1209600 ; expire
+  3600 ; minimum
+)
+
+@ IN A 80.87.198.162
+@ IN NS ns.drovosek-sochi.ru.
+@ IN NS ns4-l2.nic.ru.
+@ IN NS ns8-l2.nic.ru.
+@ IN MX 10 mx.yandex.net.
+@ IN TXT "v=spf1 redirect=_spf.yandex.net +A"
+@ IN TXT "yandex-verification: 74fbdd0a4a10a07e"
+@ IN TXT "wmail-verification: ae978fe322c940cfd045664013736fd9"
+@ IN TXT "google-site-verification=6CEmHhmpw8b7dbVJUAa0HIKLtsat82uMQoW4TtpEiOc"
+ns IN A 82.146.35.90
+storage IN A 82.146.49.218
+www IN A 80.87.198.162
+

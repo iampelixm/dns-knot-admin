@@ -1,0 +1,33 @@
+$ORIGIN hotelhosta.ru.
+$TTL 3600
+
+@ IN SOA ns.hotelhosta.ru. otel.khosta.mail.ru. (
+  1654181128 ; serial
+  3600 ; refresh
+  600 ; retry
+  1209600 ; expire
+  3600 ; minimum
+)
+
+@ IN A 80.87.198.162
+@ IN NS ns.hotelhosta.ru.
+@ IN NS ns1.hotelhosta.ru.
+@ IN NS ns2.hotelhosta.ru.
+@ IN MX 10 mail.hotelhosta.ru.
+@ IN TXT "v=spf1 a mx ip4:95.216.76.52 ~all"
+@ IN TXT "yandex-verification: bf2fdac6a886aa47"
+@ IN AAAA fe80::5054:ff:fe7f:b845
+_domainkey IN TXT "o=~"
+x._domainkey IN TXT "v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA8LTbzCG1HrsvvGazKxmIsxuQE0Skcq250NM+nbcyXkJ7x3vJtP8hF0pUyFLD8AdOx5Y7aesrSK2WOLnJlnn2jBf C1+vYmDReBRdYctdZe0uEAJxAgoAvdW6YLMxJRlZeFS23ACjk13Sh0iJw4miZSCJh9YBCm+I+VuRH0z8kEmoPryFdhKy4ZvP9WUNAICqz" "      8C1/ldS1TrL0GNvnlZ23w2tby3GcHMWSPWKoI0ZhF5/34 DJRl0MTAPC/37+snsX+xagAt63ianiLuBlDrFi6N+tKhoQjbN0XCxKFOrcE9sXxs1cHOfFaxRGw9coNj4plx5zOvuRE3KiRoToPoDPMrQIDAQAB"
+ftp IN A 95.216.76.52
+mail IN A 95.216.76.52
+ns IN A 37.230.115.233
+ns1 IN A 176.53.173.136
+ns2 IN A 77.106.252.16
+pop IN A 95.216.76.52
+smtp IN A 95.216.76.52
+storage IN A 82.146.49.218
+storage2 IN A 82.146.49.218
+www IN A 80.87.198.162
+www IN AAAA fe80::5054:ff:fe7f:b845
+

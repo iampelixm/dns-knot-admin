@@ -1,0 +1,79 @@
+;; Zone dump (Knot DNS 3.4.9)
+hotelhosta.ru.      	3600	SOA	ns.hotelhosta.ru. otel.khosta.mail.ru. 1654181128 3600 600 1209600 3600
+hotelhosta.ru.      	3600	A	80.87.198.162
+hotelhosta.ru.      	3600	NS	ns.hotelhosta.ru.
+hotelhosta.ru.      	3600	NS	ns1.hotelhosta.ru.
+hotelhosta.ru.      	3600	NS	ns2.hotelhosta.ru.
+hotelhosta.ru.      	3600	MX	10 mail.hotelhosta.ru.
+hotelhosta.ru.      	3600	TXT	"v=spf1 a mx ip4:95.216.76.52 ~all"
+hotelhosta.ru.      	3600	TXT	"yandex-verification: bf2fdac6a886aa47"
+hotelhosta.ru.      	3600	AAAA	fe80::5054:ff:fe7f:b845
+hotelhosta.ru.      	3600	DNSKEY	256 3 13 EQU7Dee/ncng1PRId9CFTavhxzhcZbMvVdquhU/WUw1YM0ArO4XrkqgOl9CSUyp9pAgWwsGQwpfkGCh+ZUj75w==
+hotelhosta.ru.      	3600	DNSKEY	257 3 13 NoQveT/Pu/jKqLX6ZpB1XMyFSVeWsYflTVjV59M3FBwrSf7+Tp/D4g+SEDwDiseECH//B0WpVAFQaPRsYd9ZVQ==
+hotelhosta.ru.      	0	CDS	51790 13 2 221677F926FBFE31F0018F5F075F8B086E85090DB22AAA85AD64D19E6A34BEA9
+hotelhosta.ru.      	0	CDNSKEY	257 3 13 NoQveT/Pu/jKqLX6ZpB1XMyFSVeWsYflTVjV59M3FBwrSf7+Tp/D4g+SEDwDiseECH//B0WpVAFQaPRsYd9ZVQ==
+_domainkey.hotelhosta.ru.	3600	TXT	"o=~"
+x._domainkey.hotelhosta.ru.	3600	TXT	"v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA8LTbzCG1HrsvvGazKxmIsxuQE0Skcq250NM+nbcyXkJ7x3vJtP8hF0pUyFLD8AdOx5Y7aesrSK2WOLnJlnn2jBf C1+vYmDReBRdYctdZe0uEAJxAgoAvdW6YLMxJRlZeFS23ACjk13Sh0iJw4miZSCJh9YBCm+I+VuRH0z8kEmoPryFdhKy4ZvP9WUNAICqz" "      8C1/ldS1TrL0GNvnlZ23w2tby3GcHMWSPWKoI0ZhF5/34 DJRl0MTAPC/37+snsX+xagAt63ianiLuBlDrFi6N+tKhoQjbN0XCxKFOrcE9sXxs1cHOfFaxRGw9coNj4plx5zOvuRE3KiRoToPoDPMrQIDAQAB"
+ftp.hotelhosta.ru.  	3600	A	95.216.76.52
+mail.hotelhosta.ru. 	3600	A	95.216.76.52
+ns.hotelhosta.ru.   	3600	A	37.230.115.233
+ns1.hotelhosta.ru.  	3600	A	176.53.173.136
+ns2.hotelhosta.ru.  	3600	A	77.106.252.16
+pop.hotelhosta.ru.  	3600	A	95.216.76.52
+smtp.hotelhosta.ru. 	3600	A	95.216.76.52
+storage.hotelhosta.ru.	3600	A	82.146.49.218
+storage2.hotelhosta.ru.	3600	A	82.146.49.218
+www.hotelhosta.ru.  	3600	A	80.87.198.162
+www.hotelhosta.ru.  	3600	AAAA	fe80::5054:ff:fe7f:b845
+;; DNSSEC signatures
+hotelhosta.ru.      	3600	RRSIG	A 13 2 3600 20260928054320 20260914041320 15033 hotelhosta.ru. JJklPwZN1nUVSXsCss4egvhgc+2g24jyPKMDuVByyQ3UyCt7ml29IwhtA5JKbmgewDCLkYWL5aBRHrKAr/MQOA==
+hotelhosta.ru.      	3600	RRSIG	NS 13 2 3600 20260928054320 20260914041320 15033 hotelhosta.ru. GVaEMX8TcaQLFTfMcGHp2o3EMv6sicXUw2bDTnpGsKKNw5+qlV6wSRElK66ESHU9Nup5ETS6J/0fcTD6N37qMQ==
+hotelhosta.ru.      	3600	RRSIG	SOA 13 2 3600 20260930184746 20260916171746 15033 hotelhosta.ru. kJGYi+akN+pKVXAOv1xux4ozQU6TipVJqFAHIvUTMM/sQ8k4fFkgriGpB1bi9jor5h5DIrH+bqq2uOoR94bk0w==
+hotelhosta.ru.      	3600	RRSIG	MX 13 2 3600 20260928054320 20260914041320 15033 hotelhosta.ru. 1oNdSnw/P4UEFkRFpqThP3BYB+soGBDtixYO5ZAFZ1jcz6JtXWJNY34gdpDQFPKoyV3vHKw2SVaDro1QTtX8zQ==
+hotelhosta.ru.      	3600	RRSIG	TXT 13 2 3600 20260928054320 20260914041320 15033 hotelhosta.ru. QbvY19VBRnh2Msd2Qk6+lKpyvypYXAow5BwcBDW9kh7jbLe9hDR7U8IezYZeT4XSG8V4QdScewl6OTfvHOZ8VA==
+hotelhosta.ru.      	3600	RRSIG	AAAA 13 2 3600 20260928054320 20260914041320 15033 hotelhosta.ru. 0Qm7cT04iJdQTUetGDkqdulOE+f8201jqVyrqXWGhZoIdLUAEoi6Kh+hPZQdxNmV90zWHRRS9QNEcWG1CzOvLg==
+hotelhosta.ru.      	3600	RRSIG	NSEC 13 2 3600 20260928054320 20260914041320 15033 hotelhosta.ru. iDc3n3fSQL/zA7Ijj8w+CA2hRi9R5L8XVCVIdEDrI7G27jG9U8tT7S+R+EKmLPhn5cNyKwna4B4cRGe1KbiRsw==
+hotelhosta.ru.      	3600	RRSIG	DNSKEY 13 2 3600 20260928074320 20260914061320 51790 hotelhosta.ru. g9dYPs10PVJ2Mv3h9MlK1oFpdHAd4FXtKWJ3GwOnzR1tN3xcuZQNMRiCPUsh5C9ycaqu52zj0eNH0vP1WXJ3eQ==
+hotelhosta.ru.      	0	RRSIG	CDS 13 2 0 20260930184746 20260916171746 51790 hotelhosta.ru. h31a96JavYWHoapb1r1t/wQECqonF3LlUAg+XFpwRP8OiNHOorvv9bAkc50H7UaFS+mu+4VPQjjYsf1kfVqqLw==
+hotelhosta.ru.      	0	RRSIG	CDNSKEY 13 2 0 20260930184746 20260916171746 51790 hotelhosta.ru. B7MkKeKTMqy7v+VKpbNSXTpNL2hD9sYzIN5PfM0i9Fqk56o0/WKfVDOMMAMyIsbNu6wP8JaBkKFb62qHi0x9aw==
+_domainkey.hotelhosta.ru.	3600	RRSIG	TXT 13 3 3600 20260928054320 20260914041320 15033 hotelhosta.ru. FpfQUGfCYKjpmAtttaFYHpqWUXNNZfLtVj70gO4GuJnW2SC6pjQlyDjOrci5VBEu5Sdigklz4AowEyDlEa8Ehg==
+_domainkey.hotelhosta.ru.	3600	RRSIG	NSEC 13 3 3600 20260928054320 20260914041320 15033 hotelhosta.ru. HCzkvzTMTCCEZe6UJWQJdykPFhdpHxdmXf7hGkKtddTm4TaS6IcfJDqztY1Nu2mQQiSpE+Z44rofhqiXWg/Lnw==
+x._domainkey.hotelhosta.ru.	3600	RRSIG	TXT 13 4 3600 20260928054320 20260914041320 15033 hotelhosta.ru. YjzB82WQZB88oTTgSSrSVmUQBfsDNdnOKhbwH0fVnrK3RKl8qkdldk3mRkKzLx1oOwmAGqm1AkLciztzrC5MXQ==
+x._domainkey.hotelhosta.ru.	3600	RRSIG	NSEC 13 4 3600 20260928054320 20260914041320 15033 hotelhosta.ru. /BLJxI2dUMvWecWCFq2IbAgh5P02YuOYKTQqmqiICJcePvUHhYBgeJPwXx4LOPWXMpQl0EuRX9SsePyAPnKYhQ==
+ftp.hotelhosta.ru.  	3600	RRSIG	A 13 3 3600 20260928054320 20260914041320 15033 hotelhosta.ru. +md6qGx4LPbRx1imXB9S+C1fhJSutMqCEeFFf27pFTiC27HvovKVLnqh16xHBdbqMgwXc0uYOBpWsE7Nufg3lw==
+ftp.hotelhosta.ru.  	3600	RRSIG	NSEC 13 3 3600 20260928054320 20260914041320 15033 hotelhosta.ru. Y43dR3FcWXyB4LfyAtIolOG6RmC5Yizc9QJP+3GhEkB6wFaaq7AOaMY+NcdDj5BLjaQOYZz3JEMVdeJ0XQBQSA==
+mail.hotelhosta.ru. 	3600	RRSIG	A 13 3 3600 20260928054320 20260914041320 15033 hotelhosta.ru. kEftaECLIuJ0fhY5xXVftdkGuT9H7GMQsdviUZ6geFQ6tAmzNviohPvQIPdwTnCGs3T7ef/N1jETkvXNr/qv6A==
+mail.hotelhosta.ru. 	3600	RRSIG	NSEC 13 3 3600 20260928054320 20260914041320 15033 hotelhosta.ru. RVrOZUiU2Nw/QaWrH7dDWQqE078FFELtfnUOF2hXtgnPItPmlXxXt2AZflCaX2UvowvmyIwEWkYRfmZVYGicmA==
+ns.hotelhosta.ru.   	3600	RRSIG	A 13 3 3600 20260928054320 20260914041320 15033 hotelhosta.ru. NPMGFomGgkC24bo1d5czsUXUgIrckvZ/s1+4jeBuhddC0WpBhhXKa3fLG51DPVYdZcEjrivURvGpXQnkWEzgYQ==
+ns.hotelhosta.ru.   	3600	RRSIG	NSEC 13 3 3600 20260928054320 20260914041320 15033 hotelhosta.ru. mU5SyZPRWzuB2tcEb0fzjW5xuHwRWmMhe5CkMkw2Cq/Eq0xHhdLWsPsXNw7i/1LCVDJmJ4A/W+PA9xD8pAQeoA==
+ns1.hotelhosta.ru.  	3600	RRSIG	A 13 3 3600 20260928054320 20260914041320 15033 hotelhosta.ru. oFlmjkWrU4OVNBgkUVynmd+NW6vT9i3ThYnd11gzrTO2oKTEYdeysbaL+NSKhOMCHsqSA4jkz+xPIIqZ6xYdNQ==
+ns1.hotelhosta.ru.  	3600	RRSIG	NSEC 13 3 3600 20260928054320 20260914041320 15033 hotelhosta.ru. eqWdLRA36cgjZ1C7jjBMLVn8t+I68Sl8eBWupwBkkYnaOD/NMos/5QDOkRuXTqY4glGllf/UsqtuWEHHyp06Qg==
+ns2.hotelhosta.ru.  	3600	RRSIG	A 13 3 3600 20260928054320 20260914041320 15033 hotelhosta.ru. GoInZ/EsYAZZFTH/d+gWReaiGaUSVr5Cb7jU5sBBd9+3wJR98AICdCD2aAoYh1FEb4dpYe1VAoCbRn37UNYerA==
+ns2.hotelhosta.ru.  	3600	RRSIG	NSEC 13 3 3600 20260928054320 20260914041320 15033 hotelhosta.ru. w3lW5SVVB8GAS8wwUS71ObtlguKEbrEZCdKYdjJ91H6hy4SHTtYlt68imkSDknUhNUbnTpiLny6dhZi8OgaJsQ==
+pop.hotelhosta.ru.  	3600	RRSIG	A 13 3 3600 20260928054320 20260914041320 15033 hotelhosta.ru. AYqQmMEyQLL/LTf/eOsvwu+N0RGTijbM//CD5IyNicGfKGt10KbE+DDwvs75PrsYzMycmugP7LKR/GPB6Tc8BA==
+pop.hotelhosta.ru.  	3600	RRSIG	NSEC 13 3 3600 20260928054320 20260914041320 15033 hotelhosta.ru. 5SCWMRA6hNMDaFs3GMdmHWhckikOxPXzzdupmb2mtnrdyAG3hejmhNg6IFSDum0UbAjv7v/reP7VEA6qb2LR0g==
+smtp.hotelhosta.ru. 	3600	RRSIG	A 13 3 3600 20260928054320 20260914041320 15033 hotelhosta.ru. ToZ/PZOLlx/fWJNY+InWD61JzyAqnJBI74x0mYOOkTMbHY1jK3CS4QPrZAweUwz8FuOpb1lKBuGyVmFEhM7w9A==
+smtp.hotelhosta.ru. 	3600	RRSIG	NSEC 13 3 3600 20260928054320 20260914041320 15033 hotelhosta.ru. OrfnDCGAXfxSzu19eLbEamhrzRSDb00TXp8I9ycKD9klxNLwXbf6JzxsIE6ynrjINADy4ip7Q1XV5p9LMysG7Q==
+storage.hotelhosta.ru.	3600	RRSIG	A 13 3 3600 20260928054320 20260914041320 15033 hotelhosta.ru. ZD41OmF665EUan9cQhZEGsXZPR0/WZE/806gStX82tK/PuxKi0t4Br4xr4TJG2M9D93whLdqo65txoYJozF7aw==
+storage.hotelhosta.ru.	3600	RRSIG	NSEC 13 3 3600 20260928054320 20260914041320 15033 hotelhosta.ru. T64JgKyHPk29hHuinEFg2ZhVWIYMe0pAbNWZibS2c9JmX3vU013Nc4NBwRtCe4ywE6NSi4Oq14vZ3kupRJ58ng==
+storage2.hotelhosta.ru.	3600	RRSIG	A 13 3 3600 20260928054320 20260914041320 15033 hotelhosta.ru. bPuhTyl4NQPBL2LmDLs2B9BuRXtBtEjMGyxvpsh/J7rQENU/STZ1OwbqV9/SlHmk487QQUN0zFPhaxxuxU2SpQ==
+storage2.hotelhosta.ru.	3600	RRSIG	NSEC 13 3 3600 20260928054320 20260914041320 15033 hotelhosta.ru. 8oJksrQ7N/yk/wHJLTgik1Ptb6cKBmFXQcOd+MhrJGouL5whOQa0+ZV10Jmc08F0bz96R60Pv2e9J7gLkyC9rQ==
+www.hotelhosta.ru.  	3600	RRSIG	A 13 3 3600 20260928054320 20260914041320 15033 hotelhosta.ru. cpSR5ziQnmGMmUJ4cVz+b9uHrSNE5uZCFMGfnCPjQy1TSBG7LuINe9Qd8IjU9U5b+bNrr782KaYPbwV7+f59KA==
+www.hotelhosta.ru.  	3600	RRSIG	AAAA 13 3 3600 20260928054320 20260914041320 15033 hotelhosta.ru. CUEknD63KzhdIJqbmZGHWsHoW0obOaJRQ5gn22qHh3UIq0fGxUati5cbx+IZYzTzE8EtULStBeTBOC37PlkXvw==
+www.hotelhosta.ru.  	3600	RRSIG	NSEC 13 3 3600 20260928054320 20260914041320 15033 hotelhosta.ru. uy/i2Lh5nc7Q819O1SIuk+C8YD0Pk8QIL6I6iPUcFjtKWKhttgu763d89cKUajT43KEJK//r8AYp371q3sXcmA==
+;; DNSSEC NSEC chain
+hotelhosta.ru.      	3600	NSEC	_domainkey.hotelhosta.ru. A NS SOA MX TXT AAAA RRSIG NSEC DNSKEY CDS CDNSKEY
+_domainkey.hotelhosta.ru.	3600	NSEC	x._domainkey.hotelhosta.ru. TXT RRSIG NSEC
+x._domainkey.hotelhosta.ru.	3600	NSEC	ftp.hotelhosta.ru. TXT RRSIG NSEC
+ftp.hotelhosta.ru.  	3600	NSEC	mail.hotelhosta.ru. A RRSIG NSEC
+mail.hotelhosta.ru. 	3600	NSEC	ns.hotelhosta.ru. A RRSIG NSEC
+ns.hotelhosta.ru.   	3600	NSEC	ns1.hotelhosta.ru. A RRSIG NSEC
+ns1.hotelhosta.ru.  	3600	NSEC	ns2.hotelhosta.ru. A RRSIG NSEC
+ns2.hotelhosta.ru.  	3600	NSEC	pop.hotelhosta.ru. A RRSIG NSEC
+pop.hotelhosta.ru.  	3600	NSEC	smtp.hotelhosta.ru. A RRSIG NSEC
+smtp.hotelhosta.ru. 	3600	NSEC	storage.hotelhosta.ru. A RRSIG NSEC
+storage.hotelhosta.ru.	3600	NSEC	storage2.hotelhosta.ru. A RRSIG NSEC
+storage2.hotelhosta.ru.	3600	NSEC	www.hotelhosta.ru. A RRSIG NSEC
+www.hotelhosta.ru.  	3600	NSEC	hotelhosta.ru. A AAAA RRSIG NSEC
+;; Written 74 records
+;; Time 2026-09-17 19:51:10 UTC

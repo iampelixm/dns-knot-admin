@@ -1,0 +1,33 @@
+$ORIGIN hoteldev.ru.
+$TTL 300
+
+@ IN SOA ns.hoteldev.ru. admin.hoteldev.ru. (
+  2026060321 ; serial
+  3600 ; refresh
+  600 ; retry
+  1209600 ; expire
+  3600 ; minimum
+)
+
+@ IN A 80.87.198.162
+@ IN NS ns.hoteldev.ru.
+@ IN NS ns1.hoteldev.ru.
+@ IN NS ns2.hoteldev.ru.
+admin IN A 77.106.252.16
+assistant IN A 77.106.252.16
+admin.assistant IN A 77.106.252.16
+amp.assistant IN A 77.106.252.16
+auth.assistant IN A 77.106.252.16
+chatwoot.assistant IN A 77.106.252.16
+sso.assistant IN A 77.106.252.16
+dev IN A 77.106.252.16
+*.dev IN A 77.106.252.16
+fd24 IN A 80.87.198.162
+*.fd24 IN A 80.87.198.162
+mail IN A 77.106.252.16
+ns IN A 37.230.115.233
+ns1 IN A 176.53.173.136
+ns2 IN A 77.106.252.16
+site IN A 80.87.198.162
+*.site IN A 80.87.198.162
+
