@@ -321,3 +321,174 @@ export async function fetchIngresses(namespace?: string): Promise<IngressListRes
   });
   return data;
 }
+
+// --- DNS Servers ---
+
+export type DnsServer = {
+  id: string;
+  name: string;
+  server_type: string;
+  address: string;
+  port: number;
+  tsig_key_id: string | null;
+  delivery_method: string;
+  delivery_config: string;
+  notes: string;
+  zone_count: number;
+  created_at: string;
+  updated_at: string;
+};
+
+export type DnsServersResponse = { servers: DnsServer[] };
+
+export type ServerTypeInfo = {
+  label: string;
+  doc_url: string;
+};
+
+export type ServerTypesResponse = { types: Record<string, ServerTypeInfo> };
+
+export type DnsServerInstructionResponse = { instruction: string };
+
+export type CreateDnsServerBody = {
+  id?: string;
+  name: string;
+  server_type: string;
+  address: string;
+  port: number;
+  tsig_key_id?: string | null;
+  create_key?: boolean;
+  delivery_method?: string;
+  delivery_config?: string;
+  notes?: string;
+};
+
+export async function fetchDnsServers(): Promise<DnsServersResponse> {
+  const { data } = await api.get<DnsServersResponse>("/api/dns-servers");
+  return data;
+}
+
+export async function fetchServerTypes(): Promise<ServerTypesResponse> {
+  const { data } = await api.get<ServerTypesResponse>("/api/dns-servers/types");
+  return data;
+}
+
+export async function fetchDnsServer(id: string): Promise<{ server: DnsServer }> {
+  const { data } = await api.get<{ server: DnsServer }>(`/api/dns-servers/${encodeURIComponent(id)}`);
+  return data;
+}
+
+export async function fetchServerInstruction(id: string): Promise<DnsServerInstructionResponse> {
+  const { data } = await api.get<DnsServerInstructionResponse>(
+    `/api/dns-servers/${encodeURIComponent(id)}/instruction`,
+  );
+  return data;
+}
+
+export async function createDnsServer(body: CreateDnsServerBody): Promise<{ server: DnsServer }> {
+  const { data } = await api.post<{ server: DnsServer }>("/api/dns-servers", body);
+  return data;
+}
+
+export async function updateDnsServer(
+  id: string,
+  body: Partial<CreateDnsServerBody>,
+): Promise<{ server: DnsServer }> {
+  const { data } = await api.put<{ server: DnsServer }>(
+    `/api/dns-servers/${encodeURIComponent(id)}`,
+    body,
+  );
+  return data;
+}
+
+export async function deleteDnsServer(id: string): Promise<void> {
+  await api.delete(`/api/dns-servers/${encodeURIComponent(id)}`);
+}
+
+export type DnsServerConfigResponse = { config: string };
+
+export async function fetchServerConfig(id: string): Promise<DnsServerConfigResponse> {
+  const { data } = await api.get<DnsServerConfigResponse>(
+    `/api/dns-servers/${encodeURIComponent(id)}/config`,
+  );
+  return data;
+}
+
+export type DeliverResponse = { result: { ok: boolean; message: string; serials?: Record<string, number> } };
+
+export async function fetchDeliver(id: string): Promise<DeliverResponse> {
+  const { data } = await api.post<DeliverResponse>(
+    `/api/dns-servers/${encodeURIComponent(id)}/deliver`,
+  );
+  return data;
+}
+
+export type FetchConfigResponse = { config?: string; error?: string };
+
+export async function fetchServerConfigFromAgent(id: string): Promise<FetchConfigResponse> {
+  const { data } = await api.post<FetchConfigResponse>(
+    `/api/dns-servers/${encodeURIComponent(id)}/fetch-config`,
+  );
+  return data;
+}
+
+export type ZoneServer = {
+  id: number;
+  zone_name: string;
+  server_id: string;
+  role: string;
+  tsig_key_id: string | null;
+  serial: number;
+  status: string;
+  last_ok_at: string | null;
+  settings: string;
+  created_at: string;
+  updated_at: string;
+  server_name: string;
+  server_type: string;
+  address: string;
+  port: number;
+};
+
+export type ZoneServersResponse = { servers: ZoneServer[] };
+export type ServerZonesResponse = { zones: ZoneServer[] };
+
+export async function fetchZoneServers(zoneName: string): Promise<ZoneServersResponse> {
+  const { data } = await api.get<ZoneServersResponse>(
+    `/api/zones/${encodeURIComponent(zoneName)}/servers`,
+  );
+  return data;
+}
+
+export async function fetchServerZones(serverId: string): Promise<ServerZonesResponse> {
+  const { data } = await api.get<ServerZonesResponse>(
+    `/api/dns-servers/${encodeURIComponent(serverId)}/zones`,
+  );
+  return data;
+}
+
+export type AssignZoneToServerBody = {
+  server_id: string;
+  role?: string;
+  tsig_key_id?: string | null;
+  serial?: number;
+  settings?: string;
+};
+
+export async function assignZoneToServer(
+  zoneName: string,
+  body: AssignZoneToServerBody,
+): Promise<{ server: ZoneServer }> {
+  const { data } = await api.post<{ server: ZoneServer }>(
+    `/api/zones/${encodeURIComponent(zoneName)}/servers`,
+    body,
+  );
+  return data;
+}
+
+export async function removeZoneFromServer(
+  zoneName: string,
+  serverId: string,
+): Promise<void> {
+  await api.delete(`/api/zones/${encodeURIComponent(zoneName)}/servers/${encodeURIComponent(serverId)}`);
+}

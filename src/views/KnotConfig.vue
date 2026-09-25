@@ -5,6 +5,7 @@
         <div class="title">knot.conf</div>
         <nav class="nav-links">
           <router-link class="nav-link" to="/">Зоны</router-link>
+          <router-link class="nav-link" to="/dns-servers">DNS-серверы</router-link>
           <router-link class="nav-link" to="/knot-conf">knot.conf</router-link>
           <router-link class="nav-link" to="/ingress-wizard">Ingress</router-link>
         </nav>

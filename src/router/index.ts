@@ -16,6 +16,7 @@ const router = createRouter({
     { path: "/login", name: "login", component: Login, meta: { public: true } },
     { path: "/", name: "home", component: Home },
     { path: "/zones/:zone", name: "zone-editor", component: Zones },
+    { path: "/dns-servers", name: "dns-servers", component: () => import("../views/DnsServers.vue") },
     { path: "/knot-conf", name: "knot-conf", component: KnotConfig },
     { path: "/ingress-wizard", name: "ingress-wizard", component: () => import("../views/IngressWizard.vue") },
   ],
