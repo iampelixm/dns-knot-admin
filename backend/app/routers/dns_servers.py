@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field
 
 from app import db as _db
 
-router = APIRouter(prefix="/api/dns-servers")
+router = APIRouter(prefix="/api/dns-servers", tags=["DNS Servers"])
 
 JWT_SECRET = os.environ.get("JWT_SECRET", "")
 JWT_ALGORITHM = "HS256"
@@ -140,6 +140,7 @@ class UpdateServerBody(BaseModel):
 def list_servers(
     _: Dict[str, Any] = Depends(_get_current_user),
 ) -> Dict[str, Any]:
+    """Список всех DNS-серверов."""
     servers = _db.list_dns_servers()
     return {"servers": servers}
 
@@ -148,6 +149,7 @@ def list_servers(
 def list_server_types(
     _: Dict[str, Any] = Depends(_get_current_user),
 ) -> Dict[str, Any]:
+    """Список поддерживаемых типов DNS-серверов."""
     return {"types": _SERVER_TYPES}
 
 
@@ -156,6 +158,7 @@ def get_server(
     server_id: str,
     _: Dict[str, Any] = Depends(_get_current_user),
 ) -> Dict[str, Any]:
+    """Получить DNS-сервер по ID."""
     server = _db.get_dns_server(server_id)
     if not server:
         raise HTTPException(status_code=404, detail="Сервер не найден")
@@ -167,6 +170,7 @@ def get_instruction(
     server_id: str,
     _: Dict[str, Any] = Depends(_get_current_user),
 ) -> Dict[str, str]:
+    """Сгенерировать инструкцию по настройке TSIG для данного сервера."""
     server = _db.get_dns_server(server_id)
     if not server:
         raise HTTPException(status_code=404, detail="Сервер не найден")
@@ -379,6 +383,7 @@ def get_config(
     server_id: str,
     _: Dict[str, Any] = Depends(_get_current_user),
 ) -> Dict[str, str]:
+    """Сгенерировать конфигурацию secondary сервера."""
     server = _db.get_dns_server(server_id)
     if not server:
         raise HTTPException(status_code=404, detail="Сервер не найден")
@@ -392,6 +397,7 @@ def create_server(
     body: CreateServerBody,
     _: Dict[str, Any] = Depends(_get_current_user),
 ) -> Dict[str, Any]:
+    """Создать новый DNS-сервер (опционально с авто-генерацией TSIG-ключа)."""
     if body.server_type not in _VALID_TYPES:
         raise HTTPException(status_code=400, detail=f"server_type: {sorted(_VALID_TYPES)}")
     if body.delivery_method not in _VALID_DELIVERY:
@@ -444,6 +450,7 @@ def update_server(
     body: UpdateServerBody,
     _: Dict[str, Any] = Depends(_get_current_user),
 ) -> Dict[str, Any]:
+    """Обновить DNS-сервер (частичное обновление)."""
     server = _db.update_dns_server(
         server_id,
         name=body.name,
@@ -465,6 +472,7 @@ def delete_server(
     server_id: str,
     _: Dict[str, Any] = Depends(_get_current_user),
 ) -> Dict[str, str]:
+    """Удалить DNS-сервер."""
     ok = _db.delete_dns_server(server_id)
     if not ok:
         raise HTTPException(status_code=404, detail="Сервер не найден")
@@ -476,6 +484,7 @@ def list_server_zones(
     server_id: str,
     _: Dict[str, Any] = Depends(_get_current_user),
 ) -> Dict[str, Any]:
+    """Список зон, привязанных к серверу."""
     server = _db.get_dns_server(server_id)
     if not server:
         raise HTTPException(status_code=404, detail="Сервер не найден")

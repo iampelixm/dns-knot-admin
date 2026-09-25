@@ -4,19 +4,22 @@ from __future__ import annotations
 
 import base64
 import datetime as dt
+import io
 import json
 import logging
 import os
 import re
 import subprocess
+import tarfile
+import time
 import traceback
 from io import StringIO
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import jwt
-from fastapi import Depends, FastAPI, HTTPException, Query, status
-from fastapi.responses import FileResponse
+from fastapi import Depends, FastAPI, File, HTTPException, Query, UploadFile, status
+from fastapi.responses import FileResponse, Response
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.staticfiles import StaticFiles
 from kubernetes import client, config
@@ -82,7 +85,18 @@ STATIC_DIR = Path(os.environ.get("STATIC_DIR", "")).resolve() if os.environ.get(
 
 bearer_scheme = HTTPBearer(auto_error=False)
 
-app = FastAPI(title="dnsadmin", version="0.4.12")
+app = FastAPI(
+    title="dnsadmin",
+    version="0.4.12",
+    description=(
+        "Управление DNS-зонами Knot DNS в Kubernetes. "
+        "JWT-аутентификация, редактор зон, управление TSIG-ключами, "
+        "синхронизация secondary, DNSSEC, Ingress-мастер, "
+        "cert-manager webhook DNS-01."
+    ),
+    contact={"name": "Alexander Semenov", "url": "https://summer-site.ru"},
+    license_info={"name": "MIT", "url": "https://opensource.org/licenses/MIT"},
+)
 app.include_router(_tsig_keys_router.router)
 app.include_router(_zones_router.router)
 app.include_router(_dns_servers_router.router)
@@ -282,6 +296,16 @@ class ZoneEditorFormModel(BaseModel):
     records: list[RecordRowModel] = Field(default_factory=list)
 
 
+class RecordRowWithSource(RecordRowModel):
+    source: str = "local"
+
+
+class FollowZoneBody(BaseModel):
+    master_zone: str
+    soa: SoaFormModel
+    ns: list[NsRowModel] = Field(default_factory=list)
+
+
 class LoginBody(BaseModel):
     username: str
     password: str
@@ -349,6 +373,17 @@ def ensure_zone_in_knot_conf(knot_conf: str, zone_name: str) -> str:
         f"    dnssec-signing: off\n"
     )
     return knot_conf.rstrip() + "\n\n" + block + "\n"
+
+
+def remove_zone_from_knot_conf(knot_conf: str, zone_name: str) -> str:
+    """Удалить блок зоны из knot.conf."""
+    pattern = (
+        rf"(?m)^\s*-\s*domain:\s*{re.escape(zone_name)}\s*\n"
+        rf"(?:^\s+(?!- )\S.*\n?)*"
+    )
+    result = re.sub(pattern, "", knot_conf)
+    result = re.sub(r"\n{3,}", "\n\n", result)
+    return result.strip() + "\n"
 
 
 def _issue_token(username: str) -> str:
@@ -593,6 +628,7 @@ def get_knot_conf(
     _: Dict[str, Any] = Depends(get_current_user),
     instance: str | None = Query(None),
 ) -> Dict[str, Any]:
+    """Получить сырой knot.conf из ConfigMap + версию схемы."""
     cm_name, _ = _resolve_instance(instance)
     core, _ = get_clients()
     data = _read_knot_conf_map(core, cm_name)
@@ -603,6 +639,7 @@ def get_knot_conf(
 
 @app.get("/api/knot-conf/schema")
 def get_knot_conf_schema(_: Dict[str, Any] = Depends(get_current_user)) -> Dict[str, Any]:
+    """Получить схему knot.conf (все секции/поля)."""
     return load_schema()
 
 
@@ -611,6 +648,7 @@ def get_knot_conf_model(
     _: Dict[str, Any] = Depends(get_current_user),
     instance: str | None = Query(None),
 ) -> Dict[str, Any]:
+    """Получить knot.conf в виде структурированной JSON-модели для редактора."""
     cm_name, _ = _resolve_instance(instance)
     core, _ = get_clients()
     raw = (_read_knot_conf_map(core, cm_name)).get("knot.conf") or ""
@@ -625,6 +663,7 @@ def post_knot_conf_validate(
     _: Dict[str, Any] = Depends(get_current_user),
     instance: str | None = Query(None),
 ) -> Dict[str, Any]:
+    """Проверить knot.conf синтаксисом knotc conf-check + AXFR-sidecar."""
     cm_name, _ = _resolve_instance(instance)
     core, _ = get_clients()
     data = _read_knot_conf_map(core, cm_name)
@@ -653,6 +692,7 @@ def put_knot_conf_raw(
     _: Dict[str, Any] = Depends(get_current_user),
     instance: str | None = Query(None),
 ) -> Dict[str, Any]:
+    """Сохранить knot.conf в ConfigMap и перезапустить Knot."""
     cm_name, dep_name = _resolve_instance(instance)
     return _apply_knot_conf_and_restart(body.content, cm_name, dep_name)
 
@@ -663,6 +703,7 @@ def put_knot_conf_model(
     _: Dict[str, Any] = Depends(get_current_user),
     instance: str | None = Query(None),
 ) -> Dict[str, Any]:
+    """Сохранить knot.conf из JSON-модели редактора в ConfigMap и перезапустить Knot."""
     cm_name, dep_name = _resolve_instance(instance)
     model = KnotEditorModel.model_validate(body)
     core, _ = get_clients()
@@ -705,6 +746,7 @@ def _axfr_structured_response(content: str) -> Dict[str, Any]:
 
 @app.get("/api/knot-conf/axfr")
 def get_axfr_fragment(_: Dict[str, Any] = Depends(get_current_user)) -> Dict[str, Any]:
+    """Прочитать AXFR Secret и разобрать YAML в structured-модель."""
     core, _ = get_clients()
     st = read_axfr_secret(
         core,
@@ -924,6 +966,7 @@ def validate_zone(
     body: ZoneValidateBody,
     _: Dict[str, Any] = Depends(get_current_user),
 ) -> Dict[str, Any]:
+    """Проверить zone-файл синтаксисом `knotc zone-check`."""
     validate_zone_name(zone_name)
     ok, errs = validate_zonefile(zone_name, body.content)
     return {"valid": ok, "errors": errs}
@@ -935,9 +978,29 @@ def parse_zone_form(
     body: ZoneValidateBody,
     _: Dict[str, Any] = Depends(get_current_user),
 ) -> Dict[str, Any]:
+    """Разобрать zone-файл в форму редактора (список записей)."""
     validate_zone_name(zone_name)
     try:
+        follower_of = _db.is_follower(zone_name)
         form = zone_text_to_form(zone_name, body.content)
+
+        if follower_of:
+            db_records = _db.list_zone_records(zone_name)
+            master_ids = {r["id"] for r in db_records if r.get("source") == "master"}
+            records_with_source = []
+            for rec in form.get("records", []):
+                is_master = False
+                for dr in db_records:
+                    if (dr["name"] == rec.get("name", "@")
+                            and dr["rtype"] == rec.get("rtype", "A")
+                            and dr["value"] == rec.get("value", "")
+                            and dr.get("source") == "master"
+                            and dr["master_rec_id"] is not None):
+                        is_master = True
+                        break
+                records_with_source.append({**rec, "source": "master" if is_master else "local"})
+            form["records"] = records_with_source
+
         return {"form": form}
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
@@ -951,6 +1014,7 @@ def render_zone_form(
     body: ZoneEditorFormModel,
     _: Dict[str, Any] = Depends(get_current_user),
 ) -> Dict[str, str]:
+    """Собрать zone-файл из формы редактора (без сохранения в кластер)."""
     validate_zone_name(zone_name)
     try:
         text = form_to_zone_text(zone_name, body.model_dump())
@@ -968,12 +1032,196 @@ def save_zone_form(
     body: ZoneEditorFormModel,
     _: Dict[str, Any] = Depends(get_current_user),
 ) -> Dict[str, str]:
+    """Сохранить зону из формы редактора (serial bump + рестарт Knot).
+
+    Для обычных зон: сохраняет records в zone_records и пропагирует изменения на follower.
+    Для follower-зон: сохраняет только local records, объединяет с master records из БД.
+    """
     validate_zone_name(zone_name)
+    follower_of = _db.is_follower(zone_name)
+
+    save_record_list = [r.model_dump() for r in body.records]
+
+    if follower_of:
+        _db.replace_records_from_form(zone_name, save_record_list, source="local")
+        master_recs = _db.list_zone_records(follower_of, source="local")
+        local_recs = _db.list_zone_records(zone_name, source="local")
+        combined = master_recs + local_recs
+        combined_form = {
+            "soa": body.soa.model_dump(),
+            "ns": [n.model_dump() for n in body.ns],
+            "records": [
+                {"name": r["name"], "ttl": r["ttl"], "rtype": r["rtype"], "value": r["value"]}
+                for r in combined
+            ],
+        }
+        try:
+            text = form_to_zone_text(zone_name, combined_form)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e)) from e
+        result = _apply_zone_update(zone_name, text)
+        return result
+
+    _db.replace_records_from_form(zone_name, save_record_list, source="local")
+
     try:
         text = form_to_zone_text(zone_name, body.model_dump())
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
-    return _apply_zone_update(zone_name, text)
+    result = _apply_zone_update(zone_name, text)
+
+    _sync_followers(zone_name)
+
+    return result
+
+
+def _sync_followers(master_zone: str):
+    """Пропагировать изменения master-зоны на все follower."""
+    follower_names = _db.get_followers(master_zone)
+    if not follower_names:
+        return
+
+    master_recs = _db.list_zone_records(master_zone, source="local")
+    master_zone_data = _db.get_zone(master_zone)
+    if not master_zone_data:
+        return
+
+    for fol_name in follower_names:
+        fol_zone_data = _db.get_zone(fol_name)
+        if not fol_zone_data:
+            continue
+
+        _db.replace_records_from_form(fol_name, [
+            {"name": r["name"], "ttl": r["ttl"], "rtype": r["rtype"],
+             "value": r["value"], "master_rec_id": r["id"]}
+            for r in master_recs
+        ], source="master")
+
+        local_recs = _db.list_zone_records(fol_name, source="local")
+        combined = master_recs + local_recs
+        combined_form = {
+            "soa": {
+                "ttl": 3600, "primary_ns": "", "admin_email": "",
+                "serial": 1, "refresh": 7200, "retry": 3600,
+                "expire": 1209600, "minimum": 300,
+            },
+            "ns": [],
+            "records": [
+                {"name": r["name"], "ttl": r["ttl"], "rtype": r["rtype"], "value": r["value"]}
+                for r in combined
+            ],
+        }
+
+        latest = _db.get_latest_version(fol_name)
+        if latest:
+            try:
+                existing_form = zone_text_to_form(fol_name, latest["content"])
+                combined_form["soa"] = {
+                    "ttl": existing_form["soa"]["ttl"],
+                    "primary_ns": existing_form["soa"]["primary_ns"],
+                    "admin_email": existing_form["soa"]["admin_email"],
+                    "serial": existing_form["soa"]["serial"],
+                    "refresh": existing_form["soa"]["refresh"],
+                    "retry": existing_form["soa"]["retry"],
+                    "expire": existing_form["soa"]["expire"],
+                    "minimum": existing_form["soa"]["minimum"],
+                }
+                combined_form["ns"] = existing_form["ns"]
+            except Exception:
+                pass
+
+        try:
+            text = form_to_zone_text(fol_name, combined_form)
+            _apply_zone_update(fol_name, text)
+        except Exception as e:
+            logger.warning("Не удалось синхронизировать follower %s с master %s: %s",
+                          fol_name, master_zone, e)
+
+
+@app.post("/api/zones/{zone_name}/follow")
+def follow_zone(
+    zone_name: str,
+    body: FollowZoneBody,
+    _: Dict[str, Any] = Depends(get_current_user),
+) -> Dict[str, str]:
+    """Создать zone_name как follower для master_zone."""
+    validate_zone_name(zone_name)
+    validate_zone_name(body.master_zone)
+
+    if zone_name == body.master_zone:
+        raise HTTPException(status_code=400, detail="Зона не может быть ведомой для самой себя")
+
+    master = _db.get_zone(body.master_zone)
+    if not master or master.get("deleted"):
+        raise HTTPException(status_code=404, detail="Мастер-зона не найдена")
+
+    existing = _db.get_zone(zone_name)
+    if existing and not existing.get("deleted"):
+        raise HTTPException(status_code=400, detail="Зона уже существует")
+
+    form_dict = {
+        "soa": body.soa.model_dump(),
+        "ns": [n.model_dump() for n in body.ns],
+        "records": [],
+    }
+    try:
+        text = form_to_zone_text(zone_name, form_dict)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+    _db.set_follower(zone_name, body.master_zone)
+
+    result = _apply_zone_update(zone_name, text)
+
+    _sync_followers(body.master_zone)
+
+    return result
+
+
+@app.post("/api/zones/{zone_name}/unfollow")
+def unfollow_zone(
+    zone_name: str,
+    _: Dict[str, Any] = Depends(get_current_user),
+) -> Dict[str, str]:
+    """Отвязать follower от master: follower_of = NULL, все записи → local."""
+    validate_zone_name(zone_name)
+    follower_of = _db.is_follower(zone_name)
+    if not follower_of:
+        raise HTTPException(status_code=400, detail="Зона не является ведомой")
+
+    _db.set_follower(zone_name, None)
+    conn = _db.get_db()
+    conn.execute(
+        "UPDATE zone_records SET source = 'local', master_rec_id = NULL "
+        "WHERE zone_name = ? AND source = 'master'",
+        (zone_name,),
+    )
+    conn.commit()
+    conn.close()
+
+    return {"status": "unfollowed"}
+
+
+@app.get("/api/zones/{zone_name}/followers")
+def get_followers(
+    zone_name: str,
+    _: Dict[str, Any] = Depends(get_current_user),
+) -> Dict[str, list[str]]:
+    """Получить список follower-зон для указанной зоны."""
+    validate_zone_name(zone_name)
+    followers = _db.get_followers(zone_name)
+    return {"followers": followers}
+
+
+@app.get("/api/zones/{zone_name}/follower-info")
+def get_follower_info(
+    zone_name: str,
+    _: Dict[str, Any] = Depends(get_current_user),
+) -> Dict[str, str | None]:
+    """Получить информацию о follower: follower_of (или null)."""
+    validate_zone_name(zone_name)
+    follower_of = _db.is_follower(zone_name)
+    return {"zone": zone_name, "follower_of": follower_of}
 
 
 @app.get("/api/zones/{zone_name}/content")
@@ -1034,6 +1282,7 @@ def patch_zone_dnssec(
     body: DnssecSigningBody,
     _: Dict[str, Any] = Depends(get_current_user),
 ) -> Dict[str, Any]:
+    """Включить/отключить DNSSEC-подписание для зоны (dnssec-signing в knot.conf)."""
     validate_zone_name(zone_name)
     core, apps = get_clients()
     cm = core.read_namespaced_config_map(CONFIGMAP_NAME, NAMESPACE)
@@ -1060,11 +1309,134 @@ def patch_zone_dnssec(
     return {"status": "ok", "restarted_at": ts, "dnssec_signing": body.signing}
 
 
+@app.post("/api/zones/{zone_name}/dnssec/init")
+def init_zone_dnssec(
+    zone_name: str,
+    _: Dict[str, Any] = Depends(get_current_user),
+) -> Dict[str, Any]:
+    """Включить DNSSEC для зоны: dnssec-signing + рестарт Knot + получение DS.
+
+    После включения Knot автоматически генерирует KSK/ZSK.
+    Эндпоинт возвращает DS/DNSKEY записи после рестарта.
+    """
+    validate_zone_name(zone_name)
+    core, apps = get_clients()
+    cm = core.read_namespaced_config_map(CONFIGMAP_NAME, NAMESPACE)
+    if cm.data is None:
+        cm.data = {}
+    data = cm.data
+    key = f"{zone_name}.zone"
+    if key not in data:
+        raise HTTPException(status_code=404, detail=f"Зона {zone_name} не найдена")
+    knot_conf = data.get("knot.conf")
+    if not knot_conf:
+        raise HTTPException(status_code=500, detail="В ConfigMap нет knot.conf")
+    if not zone_declared_in_knot_conf(knot_conf, zone_name):
+        raise HTTPException(
+            status_code=400,
+            detail="Зона не объявлена в knot.conf — создайте зону перед включением DNSSEC",
+        )
+    if list_zone_dnssec_flags(knot_conf).get(zone_name, False):
+        raise HTTPException(status_code=409, detail="DNSSEC уже включён для этой зоны")
+
+    try:
+        data["knot.conf"] = set_zone_dnssec_signing(knot_conf, zone_name, True)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    core.patch_namespaced_config_map(CONFIGMAP_NAME, NAMESPACE, cm)
+    ts = _trigger_knot_restart(apps)
+
+    host = _knot_dns_reachable_host()
+    port = int(os.environ.get("KNOT_DNS_PORT", "53"))
+    import time
+    time.sleep(2)
+    try:
+        ds_list, dnskey_list, msg = fetch_ds_records_for_zone(host, zone_name, port=port)
+    except OSError as e:
+        ds_list, dnskey_list, msg = [], [], str(e)
+
+    return {
+        "status": "ok",
+        "restarted_at": ts,
+        "dnssec_signing": True,
+        "ds": ds_list or None,
+        "dnskey": dnskey_list or None,
+        "ds_message": msg,
+    }
+
+
+@app.get("/api/zones/export")
+def export_zones(
+    _: Dict[str, Any] = Depends(get_current_user),
+):
+    """Скачать все zone-файлы + knot.conf одним tgz-архивом."""
+    core = client.CoreV1Api()
+    cm = core.read_namespaced_config_map(CONFIGMAP_NAME, NAMESPACE)
+    if cm.data is None:
+        raise HTTPException(status_code=404, detail="ConfigMap пуст")
+    data = cm.data
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w:gz") as tar:
+        knot_conf = data.get("knot.conf", "")
+        if knot_conf:
+            info = tarfile.TarInfo(name="knot.conf")
+            info.size = len(knot_conf.encode())
+            tar.addfile(info, io.BytesIO(knot_conf.encode()))
+        for key, content in data.items():
+            if key == "knot.conf" or not key.endswith(".zone"):
+                continue
+            info = tarfile.TarInfo(name=key)
+            info.size = len(content.encode())
+            tar.addfile(info, io.BytesIO(content.encode()))
+    buf.seek(0)
+    return Response(content=buf.getvalue(), media_type="application/gzip",
+                    headers={"Content-Disposition": "attachment; filename=zones-export.tgz"})
+
+
+@app.post("/api/zones/import")
+def import_zones(
+    file: UploadFile = File(...),
+    _: Dict[str, Any] = Depends(get_current_user),
+) -> Dict[str, Any]:
+    """Загрузить tgz-архив с zone-файлами и knot.conf, импортировать в ConfigMap."""
+    core = client.CoreV1Api()
+    cm = core.read_namespaced_config_map(CONFIGMAP_NAME, NAMESPACE)
+    if cm.data is None:
+        cm.data = {}
+    data = cm.data
+    imported = 0
+    new_knot_conf = None
+    try:
+        with tarfile.open(fileobj=file.file, mode="r:gz") as tar:
+            for member in tar.getmembers():
+                if member.isfile():
+                    content = tar.extractfile(member).read().decode()
+                    if member.name == "knot.conf":
+                        new_knot_conf = content
+                    elif member.name.endswith(".zone"):
+                        zone_name = member.name[:-5]
+                        validate_zone_name(zone_name)
+                        data[member.name] = content
+                        imported += 1
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Ошибка импорта: {e}")
+
+    if new_knot_conf is not None:
+        data["knot.conf"] = new_knot_conf
+    elif imported > 0:
+        raise HTTPException(status_code=400, detail="В архиве нет knot.conf")
+
+    core.patch_namespaced_config_map(CONFIGMAP_NAME, NAMESPACE, cm)
+    ts = _trigger_knot_restart(client.AppsV1Api())
+    return {"status": "ok", "zones_imported": imported, "restarted_at": ts}
+
+
 @app.get("/api/zones/{zone_name}/dnssec-ds")
 def get_zone_dnssec_ds(
     zone_name: str,
     _: Dict[str, Any] = Depends(get_current_user),
 ) -> Dict[str, Any]:
+    """Получить DS/DNSKEY записи для делегирования зоны (проверка по DNS)."""
     validate_zone_name(zone_name)
     core, _ = get_clients()
     cm = core.read_namespaced_config_map(CONFIGMAP_NAME, NAMESPACE)
@@ -1118,6 +1490,36 @@ def _sync_zone_to_secondaries(zone_name: str, core: client.CoreV1Api, apps: clie
             restarted.append(inst.get("id", ""))
         except Exception:  # noqa: BLE001
             logger.warning("Не удалось синхронизировать зону %s на инстанс %s", zone_name, inst.get("id"))
+    return restarted
+
+
+def _remove_zone_from_secondaries(zone_name: str, core: client.CoreV1Api, apps: client.AppsV1Api) -> list[str]:
+    """Удалить зону из knot.conf всех secondary инстансов.
+    Возвращает список ID инстансов, которые были перезапущены."""
+    restarted: list[str] = []
+    for inst in KNOT_INSTANCES_LIST:
+        if inst.get("role") != "secondary":
+            continue
+        cm_name = inst.get("configmap", "")
+        dep_name = inst.get("deployment", "")
+        if not cm_name or not dep_name:
+            continue
+        try:
+            sec_cm = core.read_namespaced_config_map(cm_name, NAMESPACE)
+            if sec_cm.data is None:
+                continue
+            sec_conf = sec_cm.data.get("knot.conf", "")
+            if not sec_conf:
+                continue
+            new_conf = remove_zone_from_knot_conf(sec_conf, zone_name)
+            if new_conf == sec_conf:
+                continue
+            sec_cm.data["knot.conf"] = new_conf
+            core.patch_namespaced_config_map(cm_name, NAMESPACE, sec_cm)
+            _trigger_knot_restart(apps, dep_name)
+            restarted.append(inst.get("id", ""))
+        except Exception:  # noqa: BLE001
+            logger.warning("Не удалось удалить зону %s с инстанса %s", zone_name, inst.get("id"))
     return restarted
 
 
@@ -1175,6 +1577,37 @@ def _apply_zone_update(
             result["version_id"] = str(vid)
 
     return result
+
+
+def _delete_zone_from_knot(
+    zone_name: str,
+    core: client.CoreV1Api,
+    apps: client.AppsV1Api,
+) -> Dict[str, Any]:
+    """Удалить зону из ConfigMap и knot.conf primary + secondary. Рестартнуть Knot."""
+    cm = core.read_namespaced_config_map(CONFIGMAP_NAME, NAMESPACE)
+    if cm.data is None:
+        cm.data = {}
+    key = f"{zone_name}.zone"
+    if key not in cm.data:
+        return {"status": "zone_not_found_in_cm"}
+
+    del cm.data[key]
+
+    knot_conf = cm.data.get("knot.conf", "")
+    if knot_conf:
+        cm.data["knot.conf"] = remove_zone_from_knot_conf(knot_conf, zone_name)
+
+    core.patch_namespaced_config_map(CONFIGMAP_NAME, NAMESPACE, cm)
+    ts = _trigger_knot_restart(apps)
+
+    removed = _remove_zone_from_secondaries(zone_name, core, apps)
+
+    return {
+        "status": "ok",
+        "restarted_at": ts,
+        "removed_from_secondaries": removed,
+    }
 
 
 class UpsertRecordBody(BaseModel):

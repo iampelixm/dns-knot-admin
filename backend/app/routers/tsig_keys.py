@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 
 from app import crypto_utils, db as _db
 
-router = APIRouter(prefix="/api/tsig-keys")
+router = APIRouter(prefix="/api/tsig-keys", tags=["TSIG Keys"])
 
 JWT_SECRET = os.environ.get("JWT_SECRET", "")
 JWT_ALGORITHM = "HS256"
@@ -45,27 +45,25 @@ def _get_current_user(
 
 
 @router.get("")
-def list_keys(_: Dict[str, Any] = Depends(_get_current_user)) -> Dict[str, Any]:
-    conn = _db.get_db()
-    rows = conn.execute(
-        "SELECT key_id, algorithm, scope, status, description, created_at, revoked_at "
-        "FROM tsig_keys ORDER BY created_at DESC"
-    ).fetchall()
-    conn.close()
-    return {"keys": [dict(r) for r in rows]}
-
-
-class CreateKeyBody(BaseModel):
-    name: str = ""
-    scope: str = "dns_update"
-    algorithm: str = Field(default="hmac-sha256", description="hmac-sha256, hmac-sha1, hmac-sha512")
-
-
-@router.post("", status_code=201)
-def create_key(
-    body: CreateKeyBody,
+def list_keys(
     _: Dict[str, Any] = Depends(_get_current_user),
 ) -> Dict[str, Any]:
+    """Список всех TSIG-ключей."""
+    conn = _db.get_db()
+    rows = conn.execute(
+        "SELECT key_id, algorithm, status, scope, created_at, revoked_at FROM tsig_keys ORDER BY created_at DESC"
+    ).fetchall()
+    conn.close()
+    return {"keys": rows}
+
+
+@router.post("/{key_id}")
+def create_key(
+    key_id: str,
+    body: CreateBody,
+    _: Dict[str, Any] = Depends(_get_current_user),
+) -> Dict[str, Any]:
+    """Создать новый TSIG-ключ (генерирует случайный secret)."""
     kid = body.name.strip()
     if not kid:
         raise HTTPException(status_code=400, detail="name обязателен")
@@ -108,6 +106,7 @@ def revoke_key(
     key_id: str,
     _: Dict[str, Any] = Depends(_get_current_user),
 ) -> Dict[str, str]:
+    """Отозвать ключ (status → revoked)."""
     conn = _db.get_db()
     row = conn.execute(
         "SELECT status FROM tsig_keys WHERE key_id = ?", (key_id,)
@@ -132,6 +131,7 @@ def delete_key(
     key_id: str,
     _: Dict[str, Any] = Depends(_get_current_user),
 ) -> Dict[str, str]:
+    """Полностью удалить ключ из БД."""
     conn = _db.get_db()
     row = conn.execute(
         "SELECT key_id FROM tsig_keys WHERE key_id = ?", (key_id,)

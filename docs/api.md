@@ -256,23 +256,48 @@ JSON Schema для knot.conf.
 
 ### `GET /api/zones`
 
-Список зон.
+Список зон из БД (с метаданными).
+
+**Query params:**
+- `include_deleted` — показать мягко удалённые зоны (по умолч. `false`)
 
 **Response:**
 ```json
 {
   "zones": [
-    { "name": "k3s.local", "dnssec_signing": true },
-    { "name": "summer-site.ru", "dnssec_signing": true },
-    { "name": "hoteldev.ru", "dnssec_signing": true },
-    { "name": "traveldev.ru", "dnssec_signing": true }
+    {
+      "zone_name": "k3s.local",
+      "name": "k3s.local",
+      "serial": 2026091701,
+      "dnssec_signing": true,
+      "tsig_allowed_keys": ["axfr-secondary"],
+      "deleted": 0,
+      "updated_at": "2026-09-17T10:00:00Z"
+    }
   ]
 }
 ```
 
+Поле `name` дублирует `zone_name` для обратной совместимости.
+
 ### `GET /api/zones/{zone_name}`
 
-Получить zone-файл.
+Получить метаданные зоны из БД (serial, dnssec_signing, TSIG-ключи).
+
+**Response:**
+```json
+{
+  "zone": {
+    "zone_name": "traveldev.ru",
+    "name": "traveldev.ru",
+    "serial": 2026091701
+  }
+}
+```
+
+### `GET /api/zones/{zone_name}/content`
+
+Получить zone-файл из ConfigMap Knot.
 
 **Response:**
 ```json
@@ -296,9 +321,191 @@ JSON Schema для knot.conf.
 {
   "status": "ok",
   "restarted_at": "2026-06-03T11:39:10Z",
-  "notify_sent": "true"
+  "notify_sent": "true",
+  "synced_secondaries": ["ns1", "ns2"],
+  "version_id": 42
 }
 ```
+
+### `DELETE /api/zones/{zone_name}`
+
+Удалить зону. По умолчанию — мягкое удаление (`deleted=1`).
+
+**Query params:**
+- `hard` — полное удаление из БД с версиями (`?hard=true`)
+
+**Response:**
+```json
+{ "status": "soft_deleted" }
+```
+
+### `POST /api/zones/{zone_name}/restore`
+
+Восстановить мягко удалённую зону (`deleted=0`).
+
+**Response:**
+```json
+{ "status": "restored" }
+```
+
+---
+
+## TSIG-ключи
+
+Управление TSIG-ключами для AXFR и DNS Update.
+
+### `GET /api/tsig-keys`
+
+Список всех TSIG-ключей.
+
+**Response:**
+```json
+{
+  "keys": [
+    { "key_id": "axfr-secondary", "algorithm": "hmac-sha256", "status": "active", "scope": "axfr", "created_at": "2026-09-17T10:00:00Z", "revoked_at": null }
+  ]
+}
+```
+
+### `POST /api/tsig-keys/{key_id}`
+
+Создать новый TSIG-ключ (генерирует случайный secret).
+
+**Body:**
+```json
+{
+  "algorithm": "hmac-sha256",
+  "scope": "axfr"
+}
+```
+
+**Response:**
+```json
+{
+  "key_id": "my-key",
+  "algorithm": "hmac-sha256",
+  "scope": "axfr",
+  "secret": "base64...",
+  "status": "active",
+  "created_at": "2026-09-17T10:00:00Z"
+}
+```
+
+Значение `secret` возвращается **только при создании**.
+
+### `POST /api/tsig-keys/{key_id}/revoke`
+
+Отозвать ключ (status → revoked).
+
+**Response:**
+```json
+{ "status": "revoked" }
+```
+
+### `DELETE /api/tsig-keys/{key_id}`
+
+Полностью удалить ключ из БД.
+
+**Response:**
+```json
+{ "status": "deleted" }
+```
+
+---
+
+## DNS-серверы (secondary)
+
+Управление DNS-серверами для репликации зон.
+
+### `GET /api/dns-servers`
+
+Список всех DNS-серверов.
+
+### `GET /api/dns-servers/types`
+
+Список поддерживаемых типов (knot, bind, powerdns, generic).
+
+### `GET /api/dns-servers/{server_id}`
+
+Получить DNS-сервер по ID.
+
+### `GET /api/dns-servers/{server_id}/instruction`
+
+Сгенерировать инструкцию по настройке TSIG для сервера.
+
+### `GET /api/dns-servers/{server_id}/config`
+
+Сгенерировать конфигурацию secondary (Knot/BIND/PowerDNS).
+
+### `GET /api/dns-servers/{server_id}/zones`
+
+Список зон, привязанных к серверу.
+
+### `POST /api/dns-servers` (status 201)
+
+Создать DNS-сервер. Может авто-генерировать TSIG-ключ.
+
+**Body:**
+```json
+{
+  "name": "ns2.example.com",
+  "server_type": "knot",
+  "address": "77.106.252.16",
+  "port": 53,
+  "tsig_key_id": null,
+  "create_key": true,
+  "delivery_method": "manual",
+  "delivery_config": "{}",
+  "notes": ""
+}
+```
+
+### `PUT /api/dns-servers/{server_id}`
+
+Обновить DNS-сервер (частичное обновление).
+
+### `DELETE /api/dns-servers/{server_id}`
+
+Удалить DNS-сервер.
+
+### `POST /api/dns-servers/{server_id}/fetch-config`
+
+Запросить текущий конфиг у сервера (через агента или ConfigMap).
+
+### `POST /api/dns-servers/{server_id}/deliver`
+
+Сгенерировать конфиг и отправить на DNS-сервер (через агента или ConfigMap).
+
+---
+
+## Связь зон с серверами (Zone Servers)
+
+Управление привязкой зон к DNS-серверам.
+
+### `GET /api/zones/{zone_name}/servers`
+
+Список серверов, привязанных к зоне.
+
+### `POST /api/zones/{zone_name}/servers` (status 201)
+
+Привязать DNS-сервер к зоне.
+
+**Body:**
+```json
+{
+  "server_id": "abc123",
+  "role": "secondary",
+  "tsig_key_id": null,
+  "serial": 0,
+  "settings": "{}"
+}
+```
+
+### `DELETE /api/zones/{zone_name}/servers/{server_id}`
+
+Отвязать DNS-сервер от зоны.
+
+---
 
 ### `POST /api/zones/{zone_name}/validate`
 
@@ -388,6 +595,45 @@ JSON Schema для knot.conf.
 ### `GET /api/zones/{zone_name}/dnssec-ds`
 
 Получить DS/DNSKEY записи (если DNSSEC включён).
+
+### `POST /api/zones/{zone_name}/dnssec/init`
+
+Включить DNSSEC для зоны в один шаг: `dnssec-signing: on` → рестарт Knot → ожидание генерации ключей → получение DS/DNSKEY.
+
+**Response:**
+```json
+{
+  "status": "ok",
+  "restarted_at": "2026-09-25T10:00:00Z",
+  "dnssec_signing": true,
+  "ds": ["example.com. 3600 IN DS 12345 13 2 abcdef..."],
+  "dnskey": ["example.com. 3600 IN DNSKEY 257 3 13 base64..."],
+  "ds_message": "DS fetched from Knot"
+}
+```
+
+Knot генерирует KSK и ZSK автоматически при включении подписания — `keymgr` не требуется.
+
+### `GET /api/zones/export`
+
+Скачать все zone-файлы + `knot.conf` из ConfigMap в виде `tar.gz` архива.
+
+**Response:** `application/gzip` (файл `zones-export.tgz`)
+
+### `POST /api/zones/import`
+
+Загрузить `tar.gz` архив с zone-файлами и `knot.conf`, импортировать в ConfigMap и перезапустить Knot.
+
+**Body:** `multipart/form-data` — поле `file` с архивом.
+
+**Response:**
+```json
+{
+  "status": "ok",
+  "zones_imported": 5,
+  "restarted_at": "2026-09-25T10:00:00Z"
+}
+```
 
 ### `GET /api/zones/{zone_name}/fqdns`
 

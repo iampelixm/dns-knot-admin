@@ -45,10 +45,34 @@
           >
             <el-option v-for="z in zones" :key="z" :label="z" :value="z" />
           </el-select>
+          <span v-if="followerOf" class="follower-badge">
+            <el-tag size="small" type="warning" effect="plain">
+              → {{ followerOf }}
+            </el-tag>
+          </span>
         </el-col>
         <el-col :span="16" class="toolbar">
           <el-button type="primary" @click="loadZone" :loading="loading">Загрузить</el-button>
           <el-button type="warning" @click="openCreateDialog">Новая зона</el-button>
+          <el-button
+            v-if="followerOf"
+            type="info"
+            @click="unfollowCurrentZone"
+            :loading="unfollowLoading"
+          >Отвязать от master</el-button>
+          <el-button
+            type="danger"
+            @click="openDeleteConfirm"
+            :disabled="!selectedZone"
+          >Удалить зону</el-button>
+          <el-button @click="exportZones" :loading="exportLoading">Экспорт</el-button>
+          <el-upload
+            :show-file-list="false"
+            :http-request="importZones"
+            accept=".tgz,.tar.gz,.gz"
+          >
+            <el-button :loading="importLoading">Импорт</el-button>
+          </el-upload>
         </el-col>
       </el-row>
 
@@ -113,7 +137,10 @@
                   </tr>
                   <template v-if="!collapsedGroups.has(group.key)">
                     <tr v-for="rec in group.records" :key="formModel.records.indexOf(rec)" class="record-row">
-                      <td><el-input v-model="rec.name" placeholder="@" /></td>
+                      <td>
+                        <el-input v-model="rec.name" placeholder="@" :disabled="rec.source === 'master'" />
+                        <el-tag v-if="rec.source === 'master'" size="small" type="warning" effect="plain" class="source-tag">из master</el-tag>
+                      </td>
                       <td>
                         <el-input-number
                           v-model="rec.ttl"
@@ -121,10 +148,11 @@
                           :step="60"
                           controls-position="right"
                           class="ttl-input"
+                          :disabled="rec.source === 'master'"
                         />
                       </td>
                       <td>
-                        <el-select v-model="rec.rtype" filterable>
+                        <el-select v-model="rec.rtype" filterable :disabled="rec.source === 'master'">
                           <el-option v-for="t in recordTypes" :key="t" :label="t" :value="t" />
                         </el-select>
                       </td>
@@ -134,10 +162,11 @@
                           type="textarea"
                           :autosize="{ minRows: 1 }"
                           placeholder="1.2.3.4 или 10 mail.example.com"
+                          :disabled="rec.source === 'master'"
                         />
                       </td>
                       <td class="action-cell">
-                        <el-button link type="danger" @click="removeRec(rec)">Удалить</el-button>
+                        <el-button v-if="rec.source !== 'master'" link type="danger" @click="removeRec(rec)">Удалить</el-button>
                       </td>
                     </tr>
                   </template>
@@ -224,6 +253,11 @@
                 <div>
                   <el-button :loading="dsLoading" @click="openDsDialog">Показать DS и DNSKEY</el-button>
                 </div>
+                <div v-if="!dnssecServer">
+                  <el-button type="success" :loading="dnssecInitLoading" @click="initDnssec">
+                    Включить DNSSEC (с генерацией ключей)
+                  </el-button>
+                </div>
               </el-space>
             </el-card>
             <el-alert v-else type="info" :closable="false" show-icon title="Выберите зону в списке выше." />
@@ -234,7 +268,16 @@
               <template #header>
                 <div style="display:flex;align-items:center;justify-content:space-between">
                   <span>Состояние зоны на серверах</span>
-                  <el-button size="small" :loading="syncLoading" @click="fetchSyncStatus">Обновить</el-button>
+                  <span>
+                    <el-button
+                      size="small"
+                      type="warning"
+                      :loading="syncForceLoading"
+                      :disabled="!selectedZone"
+                      @click="forceSyncZone"
+                    >Форсировать синхронизацию</el-button>
+                    <el-button size="small" :loading="syncLoading" @click="fetchSyncStatus">Обновить</el-button>
+                  </span>
                 </div>
               </template>
               <el-alert
@@ -298,12 +341,16 @@
           </el-tab-pane>
 
           <el-tab-pane label="Текст зоны" name="text">
-          <el-space direction="vertical" alignment="stretch" style="width: 100%" :size="8">
-            <el-alert v-if="validateMessage" :type="validateOk ? 'success' : 'error'" :closable="false" show-icon>
-              {{ validateMessage }}
-            </el-alert>
-            <ZoneTextEditor v-model="content" />
-          </el-space>
+            <el-space direction="vertical" alignment="stretch" style="width: 100%" :size="8">
+              <el-alert v-if="followerOf" type="warning" :closable="false" show-icon>
+                Текст зоны генерируется автоматически из записей мастер-зоны и локальных записей. Редактирование недоступно.
+              </el-alert>
+              <el-alert v-if="validateMessage" :type="validateOk ? 'success' : 'error'" :closable="false" show-icon>
+                {{ validateMessage }}
+              </el-alert>
+              <ZoneTextEditor v-if="!followerOf" v-model="content" />
+              <el-input v-else v-model="content" type="textarea" :rows="24" readonly class="mono" />
+            </el-space>
           </el-tab-pane>
         </el-tabs>
       </div>
@@ -311,6 +358,7 @@
       <CreateZoneDialog
         v-model:visible="createDialogVisible"
         :existing-zones="zones"
+        :zone-summaries="zoneSummaries"
         @created="onZoneCreated"
       />
 
@@ -366,7 +414,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, reactive, ref, toRaw, watch } from "vue";
 import { useRouter, useRoute } from "vue-router";
-import { ElMessage } from "element-plus";
+import { ElMessage, ElMessageBox } from "element-plus";
 import { ArrowDown, ArrowRight } from "@element-plus/icons-vue";
 import AppFooter from "../components/AppFooter.vue";
 import ZoneTextEditor from "../components/ZoneTextEditor.vue";
@@ -375,16 +423,20 @@ import {
   api,
   AUTH_TOKEN_KEY,
   emptyZoneForm,
+  unfollowZone,
+  fetchFollowerInfo,
   type DnsHealthResponse,
   type DnssecDsResponse,
   type ZoneFormModel,
+  type ZoneFormWithSource,
   type ZoneSummary,
   type ZoneSyncEntry,
   type ZonesSyncStatusResponse,
   type ZonesResponse,
-  type ZoneResponse,
+  type ZoneContentResponse,
   type ValidateResponse,
   type RecordRow,
+  type RecordRowWithSource,
 } from "../api/client";
 const router = useRouter();
 const route = useRoute();
@@ -415,9 +467,13 @@ let dnsTimer: ReturnType<typeof setInterval> | null = null;
 const dnssecLocal = ref(false);
 const dnssecServer = ref(false);
 const dnssecSaving = ref(false);
+const dnssecInitLoading = ref(false);
+const exportLoading = ref(false);
+const importLoading = ref(false);
 const dnssecDirty = computed(() => dnssecLocal.value !== dnssecServer.value);
 
 const syncLoading = ref(false);
+const syncForceLoading = ref(false);
 const syncZones = ref<ZoneSyncEntry[]>([]);
 const syncWarning = ref("");
 const syncUpdatedAt = ref("");
@@ -433,6 +489,9 @@ const dsDialogTab = ref<"ds" | "dnskey">("ds");
 const dsDialogRuFamily = ref(false);
 const dsDialogHint = ref("");
 
+const followerOf = ref<string | null>(null);
+const unfollowLoading = ref(false);
+
 async function fetchSyncStatus() {
   syncLoading.value = true;
   try {
@@ -444,6 +503,22 @@ async function fetchSyncStatus() {
     syncWarning.value = messageFromAxios(e, "Не удалось получить статус синхронизации");
   } finally {
     syncLoading.value = false;
+  }
+}
+
+async function forceSyncZone() {
+  if (!selectedZone.value) return;
+  syncForceLoading.value = true;
+  try {
+    const { data } = await api.post(
+      `/api/zones/${encodeURIComponent(selectedZone.value)}/sync`,
+    );
+    ElMessage.success(`Синхронизировано: ${(data.synced_secondaries || []).join(", ") || "нет secondary"}`);
+    fetchSyncStatus();
+  } catch (e) {
+    ElMessage.error(messageFromAxios(e, "Не удалось синхронизировать зону"));
+  } finally {
+    syncForceLoading.value = false;
   }
 }
 
@@ -468,6 +543,27 @@ async function applyDnssec() {
     ElMessage.error(messageFromAxios(e, "Не удалось обновить DNSSEC"));
   } finally {
     dnssecSaving.value = false;
+  }
+}
+
+async function initDnssec() {
+  if (!selectedZone.value) return;
+  dnssecInitLoading.value = true;
+  try {
+    const resp = await api.post(
+      `/api/zones/${encodeURIComponent(selectedZone.value)}/dnssec/init`,
+    );
+    ElMessage.success("DNSSEC включён, Knot перезапущен, ключи сгенерированы");
+    await loadZones();
+    syncDnssecFromServer();
+    if (resp.data?.ds) {
+      dsDialogText.value = resp.data.ds.join("\n") + "\n\n" + (resp.data.dnskey ?? []).join("\n");
+      dsDialogVisible.value = true;
+    }
+  } catch (e) {
+    ElMessage.error(messageFromAxios(e, "Не удалось включить DNSSEC"));
+  } finally {
+    dnssecInitLoading.value = false;
   }
 }
 
@@ -584,6 +680,38 @@ function openCreateDialog() {
   createDialogVisible.value = true;
 }
 
+async function exportZones() {
+  exportLoading.value = true;
+  try {
+    const resp = await api.get("/api/zones/export", { responseType: "blob" });
+    const url = URL.createObjectURL(new Blob([resp.data], { type: "application/gzip" }));
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "zones-export.tgz";
+    a.click();
+    URL.revokeObjectURL(url);
+  } catch (e) {
+    ElMessage.error(messageFromAxios(e, "Не удалось выгрузить бэкап"));
+  } finally {
+    exportLoading.value = false;
+  }
+}
+
+async function importZones(options: { file: File }) {
+  importLoading.value = true;
+  try {
+    const form = new FormData();
+    form.append("file", options.file);
+    const { data } = await api.post("/api/zones/import", form);
+    ElMessage.success(`Импортировано ${data.zones_imported} зон, Knot перезапущен`);
+    await loadZones();
+  } catch (e) {
+    ElMessage.error(messageFromAxios(e, "Не удалось импортировать зоны"));
+  } finally {
+    importLoading.value = false;
+  }
+}
+
 async function onZoneCreated(name: string) {
   await router.push({ name: "zone-editor", params: { zone: name } });
 }
@@ -601,7 +729,7 @@ function resetFormShell() {
   rebuildDisplay();
 }
 
-function assignForm(data: ZoneFormModel) {
+function assignForm(data: ZoneFormWithSource) {
   formModel.soa = { ...data.soa };
   formModel.ns.splice(0, formModel.ns.length, ...(data.ns.length ? data.ns : [{ host: "" }]));
   formModel.records.splice(
@@ -612,6 +740,7 @@ function assignForm(data: ZoneFormModel) {
       ttl: r.ttl === null || r.ttl === undefined ? undefined : r.ttl,
       rtype: r.rtype,
       value: r.value,
+      source: r.source || "local",
     })),
   );
   rebuildDisplay();
@@ -652,10 +781,17 @@ async function loadZone() {
   if (!selectedZone.value) return;
   loading.value = true;
   formParseError.value = "";
+  followerOf.value = null;
   try {
-    const { data } = await api.get<ZoneResponse>(`/api/zones/${encodeURIComponent(selectedZone.value)}`);
+    const { data } = await api.get<ZoneContentResponse>(
+      `/api/zones/${encodeURIComponent(selectedZone.value)}/content`,
+    );
     content.value = data.content;
     await syncFormFromText(false);
+
+    const fi = await fetchFollowerInfo(selectedZone.value);
+    followerOf.value = fi.follower_of;
+
     ElMessage.success("Зона загружена");
   } catch (e) {
     ElMessage.error(messageFromAxios(e, "Не удалось загрузить зону"));
@@ -675,7 +811,7 @@ async function syncFormFromText(showToast = true) {
   formLoading.value = true;
   formParseError.value = "";
   try {
-    const { data } = await api.post<{ form: ZoneFormModel }>(
+    const { data } = await api.post<{ form: ZoneFormWithSource }>(
       `/api/zones/${encodeURIComponent(selectedZone.value)}/parse-form`,
       { content: content.value },
     );
@@ -763,6 +899,22 @@ async function saveZone() {
   }
 }
 
+async function openDeleteConfirm() {
+  if (!selectedZone.value) return;
+  try {
+    await ElMessageBox.confirm(
+      `Вы уверены, что хотите удалить зону «${selectedZone.value}»? Зона будет удалена из ConfigMap и БД.`,
+      "Удаление зоны",
+      { confirmButtonText: "Удалить", cancelButtonText: "Отмена", type: "warning" },
+    );
+    await api.delete(`/api/zones/${encodeURIComponent(selectedZone.value)}`);
+    ElMessage.success(`Зона «${selectedZone.value}» удалена`);
+    await router.push({ name: "home" });
+  } catch {
+    // cancelled or error
+  }
+}
+
 function addNs() {
   formModel.ns.push({ host: "" });
 }
@@ -773,23 +925,38 @@ function removeNs(i: number) {
 }
 
 function addRec() {
-  formModel.records.push({ name: "@", rtype: "A", value: "" });
+  formModel.records.push({ name: "@", rtype: "A", value: "", source: "local" });
   rebuildDisplay();
 }
 
 function addRecInGroup(groupKey: string) {
   const name = groupKey === "@" ? "@" : groupKey;
-  formModel.records.push({ name, rtype: "A", value: "" });
+  formModel.records.push({ name, rtype: "A", value: "", source: "local" });
   const s = new Set(collapsedGroups.value);
   s.delete(groupKey);
   collapsedGroups.value = s;
   rebuildDisplay();
 }
 
-function removeRec(rec: RecordRow) {
+function removeRec(rec: RecordRowWithSource) {
   const idx = formModel.records.indexOf(rec);
   if (idx >= 0) formModel.records.splice(idx, 1);
   rebuildDisplay();
+}
+
+async function unfollowCurrentZone() {
+  if (!selectedZone.value || !followerOf.value) return;
+  unfollowLoading.value = true;
+  try {
+    await unfollowZone(selectedZone.value);
+    ElMessage.success(`Зона отвязана от ${followerOf.value}`);
+    followerOf.value = null;
+    await loadZone();
+  } catch (e) {
+    ElMessage.error(messageFromAxios(e, "Не удалось отвязать зону"));
+  } finally {
+    unfollowLoading.value = false;
+  }
 }
 
 watch(activeTab, (tab) => {
@@ -984,6 +1151,8 @@ onUnmounted(() => {
   vertical-align: middle;
 }
 .action-cell { text-align: center; }
+.follower-badge { margin-left: 8px; }
+.source-tag { margin-left: 4px; flex-shrink: 0; }
 :deep(.el-textarea__inner) {
   word-break: break-all;
 }

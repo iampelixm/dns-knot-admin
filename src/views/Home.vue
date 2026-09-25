@@ -52,10 +52,13 @@
             >
               <el-table-column label="Зона" prop="name" sortable min-width="200">
                 <template #default="{ row }">
-                  <router-link
-                    class="zone-link"
-                    :to="{ name: 'zone-editor', params: { zone: row.name } }"
-                  >{{ row.name }}</router-link>
+                  <div style="display:flex;align-items:center;gap:6px">
+                    <router-link
+                      class="zone-link"
+                      :to="{ name: 'zone-editor', params: { zone: row.name } }"
+                    >{{ row.name }}</router-link>
+                    <el-tag v-if="row.is_follower" size="small" type="warning" effect="plain">ведомая</el-tag>
+                  </div>
                 </template>
               </el-table-column>
 
@@ -186,6 +189,7 @@
   <CreateZoneDialog
     v-model:visible="createDialogVisible"
     :existing-zones="zoneSummaries.map(z => z.name)"
+    :zone-summaries="zoneSummaries"
     @created="onZoneCreated"
   />
 </template>

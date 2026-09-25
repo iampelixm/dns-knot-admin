@@ -11,7 +11,7 @@ from pydantic import BaseModel
 
 from app import db as _db
 
-router = APIRouter(prefix="/api/zones")
+router = APIRouter(prefix="/api/zones", tags=["Zone Servers"])
 
 JWT_SECRET = os.environ.get("JWT_SECRET", "")
 JWT_ALGORITHM = "HS256"
@@ -56,6 +56,7 @@ def list_zone_servers(
     zone_name: str,
     _: Dict[str, Any] = Depends(_get_current_user),
 ) -> Dict[str, Any]:
+    """Список серверов, привязанных к зоне."""
     zone = _db.get_zone(zone_name)
     if not zone:
         raise HTTPException(status_code=404, detail="Зона не найдена")
@@ -69,6 +70,7 @@ def assign_server(
     body: AssignServerBody,
     _: Dict[str, Any] = Depends(_get_current_user),
 ) -> Dict[str, Any]:
+    """Привязать DNS-сервер к зоне (secondary / master)."""
     zone = _db.get_zone(zone_name)
     if not zone:
         raise HTTPException(status_code=404, detail="Зона не найдена")
@@ -102,6 +104,7 @@ def remove_server_from_zone(
     server_id: str,
     _: Dict[str, Any] = Depends(_get_current_user),
 ) -> Dict[str, str]:
+    """Отвязать DNS-сервер от зоны."""
     ok = _db.remove_zone_from_server(zone_name, server_id)
     if not ok:
         raise HTTPException(status_code=404, detail="Связь не найдена")

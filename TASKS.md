@@ -12,35 +12,38 @@ Secondary ConfigMap-ы (`knot-config-ns1`, `knot-config-ns2`) не обновл�
 - [x] Рестартовать secondary Deployment-ы после обновления их ConfigMap
 - [x] Синхронизация работает на каждом сохранении, а не только для новых зон
 - [x] Добавлен эндпоинт `POST /api/zones/{zone}/sync` для принудительной синхронизации
-- [ ] Для `summer-site.ru` (уже создана): достаточно отредактировать и сохранить —
+- [x] Для `summer-site.ru` (уже создана): достаточно отредактировать и сохранить —
       или вызвать `POST /api/zones/summer-site.ru/sync`
+- [x] После добавления зоны — выполнить синхронизацию: `POST /api/zones/summer-site.ru/sync`
 
-### P1: API-документация (high)
-- [ ] Включить Swagger UI и ReDoc в FastAPI (сейчас `docs_url=None, redoc_url=None`)
-- [ ] Добавить автодокументацию по каждому эндпоинту
-- [ ] При необходимости защитить /docs базовой аутентификацией или закрыть за JWT
-- [ ] Обновить docs/api.md до актуального состояния
+### ✅ API-документация (v0.4.13)
+- [x] Swagger UI (`/docs`) и ReDoc (`/redoc`) включены
+- [x] OpenAPI-описание + docstrings ко всем эндпоинтам
+- [x] Теги для группировки роутеров (Zones, TSIG Keys, DNS Servers, Zone Servers)
+- [x] docs/api.md обновлён до актуального состояния
+- [x] Исправлена API-несовместимость (zone_name → name, content URL)
 
-### P2: Удаление зон (medium)
-Нет UI/API для удаления зоны. Нужно:
-- [ ] DELETE /api/zones/{zone_name} — удалить zone-файл из ConfigMap, убрать блок
-      из knot.conf, перезапустить Knot
-- [ ] Добавить кнопку удаления в UI (с подтверждением)
+### ✅ Удаление зон (v0.4.13)
+- [x] DELETE /api/zones/{zone_name} — удаляет zone-файл из ConfigMap, убирает блок из knot.conf,
+      перезапускает Knot primary + secondary, затем удаляет из БД
+- [x] Кнопка удаления в UI редактора зон (с подтверждением ElMessageBox)
 
-### P2: Ручное управление zone-файлами через API (medium)
-- [ ] Добавить эндпоинт POST /api/zones — создание новой зоны с базовым шаблоном
+### ✅ P2: Ручное управление zone-файлами через API (medium)
+- [x] CreateZoneDialog — создание зоны через PUT /api/zones/{name}/form
+- [ ] POST /api/zones — эндпоинт создания зоны с базовым шаблоном
 - [ ] PATCH /api/zones/{zone_name}/serial — ручной serial bump
 
-### P3: DNSSEC — генерация ключей (medium)
-DNSSEC DS/DNSKEY отображаются, но нет UI для первоначального включения
-(нужно сгенерировать KSK/ZSK через `keymgr`).
+### ✅ P3: DNSSEC — генерация ключей (medium)
+DNSSEC DS/DNSKEY отображаются, есть UI для включения.
+Knot генерирует KSK/ZSK автоматически при включении dnssec-signing.
 
-- [ ] POST /api/zones/{zone_name}/dnssec/init — генерация ключей + включение signing
-- [ ] Соответствующий UI в редакторе зон
+- [x] POST /api/zones/{zone_name}/dnssec/init — включение signing + рестарт + получение DS
+- [x] Кнопка «Включить DNSSEC (с генерацией ключей)» в UI
 
-### P3: Backup зон (medium)
-- [ ] Скрипт или эндпоинт для бэкапа всех zone-файлов из ConfigMap
-- [ ] Restore зон из бэкапа
+### ✅ P3: Backup зон (medium)
+- [x] GET /api/zones/export — скачать все zone-файлы + knot.conf tgz
+- [x] POST /api/zones/import — загрузить tgz и импортировать в ConfigMap
+- [x] Кнопки «Экспорт» / «Импорт» в тулбаре редактора зон
 
 ### P4: ns1 — нода hello в статусе NotReady (low)
 - [ ] Восстановить ноду hello.cluster.summersite.ru или перенести ns1 на другую ноду

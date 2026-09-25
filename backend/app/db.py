@@ -97,6 +97,8 @@ def migrate():
     conn.executescript(_SCHEMA_SQL)
     _check_and_add_column(conn, "zones", "deleted",
                           "ALTER TABLE zones ADD COLUMN deleted INTEGER NOT NULL DEFAULT 0")
+    _check_and_add_column(conn, "zones", "follower_of",
+                          "ALTER TABLE zones ADD COLUMN follower_of TEXT REFERENCES zones(zone_name)")
     _ensure_table(conn, "dns_servers", """
         CREATE TABLE IF NOT EXISTS dns_servers (
             id TEXT PRIMARY KEY,
@@ -131,8 +133,26 @@ def migrate():
             UNIQUE(zone_name, server_id)
         )
     """)
+    _ensure_table(conn, "zone_records", """
+        CREATE TABLE IF NOT EXISTS zone_records (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            zone_name TEXT NOT NULL,
+            name TEXT NOT NULL,
+            ttl INTEGER,
+            rtype TEXT NOT NULL,
+            value TEXT NOT NULL,
+            source TEXT NOT NULL DEFAULT 'local',
+            master_rec_id INTEGER,
+            ord INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+            FOREIGN KEY (zone_name) REFERENCES zones(zone_name) ON DELETE CASCADE
+        )
+    """)
     conn.commit()
     conn.close()
+
+    migrate_zone_records_from_versions()
 
 
 def _check_and_add_column(conn: sqlite3.Connection, table: str, column: str, alter_sql: str):
@@ -273,6 +293,9 @@ def startup_backup(
 
         setting_set_raw(conn, "initial_backup_done", "true")
         conn.commit()
+
+        migrate_zone_records_from_versions_in_conn(conn, zone_files)
+        conn.commit()
     except Exception:
         conn.rollback()
         raise
@@ -359,6 +382,7 @@ def hard_delete_zone(zone_name: str) -> bool:
         conn.close()
         return False
     try:
+        conn.execute("DELETE FROM zone_records WHERE zone_name = ?", (zone_name,))
         conn.execute("DELETE FROM zone_versions WHERE zone_name = ?", (zone_name,))
         conn.execute("DELETE FROM zones WHERE zone_name = ?", (zone_name,))
         conn.commit()
@@ -583,3 +607,187 @@ def update_zone_server_status(
         if r["server_id"] == server_id:
             return r
     return None
+
+
+# ── follower zones ──
+
+
+def set_follower(zone_name: str, master_zone: str | None) -> bool:
+    conn = get_db()
+    conn.execute(
+        "UPDATE zones SET follower_of = ?, updated_at = datetime('now') WHERE zone_name = ?",
+        (master_zone, zone_name),
+    )
+    n = conn.execute("SELECT changes()").fetchone()[0]
+    conn.commit()
+    conn.close()
+    return n > 0
+
+
+def get_followers(master_zone: str) -> list[str]:
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT zone_name FROM zones WHERE follower_of = ? AND deleted = 0 ORDER BY zone_name",
+        (master_zone,),
+    ).fetchall()
+    conn.close()
+    return [r["zone_name"] for r in rows]
+
+
+def is_follower(zone_name: str) -> str | None:
+    conn = get_db()
+    row = conn.execute(
+        "SELECT follower_of FROM zones WHERE zone_name = ? AND deleted = 0",
+        (zone_name,),
+    ).fetchone()
+    conn.close()
+    return row["follower_of"] if row and row["follower_of"] else None
+
+
+# ── zone_records CRUD ──
+
+
+def list_zone_records(zone_name: str, source: str | None = None) -> list[dict]:
+    conn = get_db()
+    sql = "SELECT * FROM zone_records WHERE zone_name = ?"
+    params: list[Any] = [zone_name]
+    if source:
+        sql += " AND source = ?"
+        params.append(source)
+    sql += " ORDER BY ord, id"
+    rows = conn.execute(sql, params).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def replace_records_from_form(zone_name: str, records: list[dict], source: str = "local") -> list[int]:
+    """Заменить все записи с указанным source на переданные. Возвращает список id вставленных записей."""
+    conn = get_db()
+    conn.execute("DELETE FROM zone_records WHERE zone_name = ? AND source = ?", (zone_name, source))
+    ids: list[int] = []
+    now = "datetime('now')"
+    for i, rec in enumerate(records):
+        conn.execute(
+            f"INSERT INTO zone_records "
+            f"(zone_name, name, ttl, rtype, value, source, master_rec_id, ord, created_at, updated_at) "
+            f"VALUES (?, ?, ?, ?, ?, ?, ?, ?, {now}, {now})",
+            (
+                zone_name,
+                rec.get("name", "@"),
+                rec.get("ttl"),
+                rec.get("rtype", "A"),
+                rec.get("value", ""),
+                source,
+                rec.get("master_rec_id"),
+                i,
+            ),
+        )
+        ids.append(conn.execute("SELECT last_insert_rowid()").fetchone()[0])
+    conn.commit()
+    conn.close()
+    return ids
+
+
+def append_master_records(zone_name: str, master_zone: str) -> int:
+    """Скопировать все local-записи master_zone как source='master' в zone_name. Возвращает количество."""
+    conn = get_db()
+    conn.execute(
+        "DELETE FROM zone_records WHERE zone_name = ? AND source = 'master'",
+        (zone_name,),
+    )
+    conn.execute(
+        f"INSERT INTO zone_records "
+        f"(zone_name, name, ttl, rtype, value, source, master_rec_id, ord, created_at, updated_at) "
+        f"SELECT ?, r.name, r.ttl, r.rtype, r.value, 'master', r.id, "
+        f"(SELECT COALESCE(MAX(zr.ord), -1) + 1 + ROW_NUMBER() OVER () FROM zone_records zr WHERE zr.zone_name = ?), "
+        f"datetime('now'), datetime('now') "
+        f"FROM zone_records r WHERE r.zone_name = ? AND r.source = 'local'",
+        (zone_name, zone_name, master_zone),
+    )
+    n = conn.execute("SELECT changes()").fetchone()[0]
+    conn.commit()
+    conn.close()
+    return n
+
+
+def delete_zone_records(zone_name: str):
+    conn = get_db()
+    conn.execute("DELETE FROM zone_records WHERE zone_name = ?", (zone_name,))
+    conn.commit()
+    conn.close()
+
+
+def remove_master_records_by_ids(zone_name: str, master_rec_ids: list[int]):
+    """Удалить конкретные master-записи из follower (при удалении в master)."""
+    if not master_rec_ids:
+        return
+    placeholders = ",".join("?" for _ in master_rec_ids)
+    conn = get_db()
+    conn.execute(
+        f"DELETE FROM zone_records WHERE zone_name = ? AND source = 'master' AND master_rec_id IN ({placeholders})",
+        [zone_name, *master_rec_ids],
+    )
+    conn.commit()
+    conn.close()
+
+
+def _migrate_zone_records_from_versions_in_conn(
+    conn: sqlite3.Connection,
+    zone_files: dict[str, str] | None = None,
+):
+    from app.zone_editor import zone_text_to_form
+
+    zones_to_process = [r["zone_name"] for r in conn.execute(
+        "SELECT zone_name FROM zones WHERE deleted = 0"
+    ).fetchall()]
+
+    for z in zones_to_process:
+        existing = conn.execute(
+            "SELECT COUNT(*) AS cnt FROM zone_records WHERE zone_name = ?",
+            (z,),
+        ).fetchone()
+        if existing and existing["cnt"] > 0:
+            continue
+
+        content = None
+        if zone_files:
+            content = zone_files.get(f"{z}.zone")
+        if not content:
+            row = conn.execute(
+                "SELECT content FROM zone_versions WHERE zone_name = ? ORDER BY created_at DESC LIMIT 1",
+                (z,),
+            ).fetchone()
+            if row:
+                content = row["content"]
+        if not content:
+            continue
+
+        try:
+            form = zone_text_to_form(z, content)
+            now = "datetime('now')"
+            for i, rec in enumerate(form.get("records", [])):
+                conn.execute(
+                    f"INSERT INTO zone_records "
+                    f"(zone_name, name, ttl, rtype, value, source, ord, created_at, updated_at) "
+                    f"VALUES (?, ?, ?, ?, ?, 'local', ?, {now}, {now})",
+                    (z, rec.get("name", "@"), rec.get("ttl"),
+                     rec.get("rtype", "A"), rec.get("value", ""), i),
+                )
+        except Exception:
+            pass
+
+    setting_set_raw(conn, "zone_records_migrated", "true")
+
+
+def migrate_zone_records_from_versions(zone_files: dict[str, str] | None = None):
+    already = setting_get("zone_records_migrated")
+    if already:
+        return {"status": "skipped"}
+
+    conn = get_db()
+    try:
+        _migrate_zone_records_from_versions_in_conn(conn, zone_files)
+        conn.commit()
+    finally:
+        conn.close()
+    return {"status": "ok"}

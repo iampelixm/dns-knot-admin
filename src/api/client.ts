@@ -15,7 +15,7 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
-export type ZoneSummary = { name: string; dnssec_signing: boolean };
+export type ZoneSummary = { name: string; dnssec_signing: boolean; is_follower?: boolean; follower_of?: string | null };
 
 export type ZonesResponse = { zones: ZoneSummary[] };
 
@@ -34,6 +34,10 @@ export type DnssecDsResponse = {
   registrar_ru_family?: boolean;
 };
 export type ZoneResponse = { zone: string; content: string };
+
+export type ZoneContentResponse = { content: string };
+
+export type ZoneMetaResponse = { zone: Record<string, unknown> };
 export type ValidateResponse = { valid: boolean; errors: string[] };
 export type DnsHealthResponse = {
   ok: boolean;
@@ -65,13 +69,18 @@ export type RecordRow = {
   ttl?: number;
   rtype: string;
   value: string;
+  source?: string;
 };
+
+export type RecordRowWithSource = RecordRow;
 
 export type ZoneFormModel = {
   soa: SoaForm;
   ns: NsRow[];
   records: RecordRow[];
 };
+
+export type ZoneFormWithSource = ZoneFormModel;
 
 export function defaultSoa(): SoaForm {
   const serial = Number(`${new Date().toISOString().slice(0, 10).replace(/-/g, "")}01`);
@@ -491,4 +500,47 @@ export async function removeZoneFromServer(
   serverId: string,
 ): Promise<void> {
   await api.delete(`/api/zones/${encodeURIComponent(zoneName)}/servers/${encodeURIComponent(serverId)}`);
+}
+
+export async function deleteZone(zoneName: string): Promise<void> {
+  await api.delete(`/api/zones/${encodeURIComponent(zoneName)}`);
+}
+
+// --- Follower zones ---
+
+export type FollowZoneBody = {
+  master_zone: string;
+  soa: SoaForm;
+  ns: NsRow[];
+};
+
+export type FollowerInfoResponse = {
+  zone: string;
+  follower_of: string | null;
+};
+
+export type FollowersResponse = {
+  followers: string[];
+};
+
+export async function followZone(zoneName: string, body: FollowZoneBody): Promise<void> {
+  await api.post(`/api/zones/${encodeURIComponent(zoneName)}/follow`, body);
+}
+
+export async function unfollowZone(zoneName: string): Promise<void> {
+  await api.post(`/api/zones/${encodeURIComponent(zoneName)}/unfollow`);
+}
+
+export async function fetchFollowers(zoneName: string): Promise<FollowersResponse> {
+  const { data } = await api.get<FollowersResponse>(
+    `/api/zones/${encodeURIComponent(zoneName)}/followers`,
+  );
+  return data;
+}
+
+export async function fetchFollowerInfo(zoneName: string): Promise<FollowerInfoResponse> {
+  const { data } = await api.get<FollowerInfoResponse>(
+    `/api/zones/${encodeURIComponent(zoneName)}/follower-info`,
+  );
+  return data;
 }
