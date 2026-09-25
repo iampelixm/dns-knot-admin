@@ -66,6 +66,9 @@ verify_context_access
 export REGISTRY="${REGISTRY:-registry.summer-site.ru}"
 export REGISTRY_IMAGE="${REGISTRY_IMAGE:-dns-knot/dnsadmin}"
 export DNSADMIN_IMAGE="${DNSADMIN_IMAGE:-$REGISTRY/$REGISTRY_IMAGE}"
+export AGENT_IMAGE="${AGENT_IMAGE:-$REGISTRY/dns-agent:latest}"
+export AGENT_API_KEY="${AGENT_API_KEY:-dns-agent-key}"
+export AGENT_SECRET_NAME="${AGENT_SECRET_NAME:-dns-agent-key}"
 export NAMESPACE="${NAMESPACE:-dns-knot}"
 export PULL_SECRET_NAME="${PULL_SECRET_NAME:-registry-summersite}"
 
@@ -97,6 +100,21 @@ if [[ "$SKIP_BUILD" != "1" ]]; then
   fi
 else
   info "Сборка пропущена (--skip-image-build). Образ: $DNSADMIN_IMAGE"
+fi
+
+# ── 3b. Сборка и push образа агента ──────────────────────────────────────────
+if [[ "$SKIP_BUILD" != "1" ]]; then
+  REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+  if [[ -f "$REPO_ROOT/agent/Dockerfile" ]]; then
+    info "Сборка и push образа агента $AGENT_IMAGE"
+    docker build -t "$AGENT_IMAGE" -f "$REPO_ROOT/agent/Dockerfile" "$REPO_ROOT/agent"
+    docker push "$AGENT_IMAGE"
+    success "Образ агента запушен: $AGENT_IMAGE"
+  else
+    warn "agent/Dockerfile не найден — пропускаю сборку агента."
+  fi
+else
+  info "Сборка агента пропущена. Образ: $AGENT_IMAGE"
 fi
 
 # ── 4. Apply ───────────────────────────────────────────────────────────────────
@@ -137,9 +155,10 @@ fi
 ensure_pull_secret "$NAMESPACE"
 
 # ── 5. Rollout ─────────────────────────────────────────────────────────────────
-info "Ожидание rollout Deployment knot и dnsadmin..."
+info "Ожидание rollout Deployment knot, dnsadmin и DaemonSet dns-agent..."
 $KUBECTL -n "$NAMESPACE" rollout status deployment/knot --timeout=300s || warn "knot не стал ready за отведённое время"
 $KUBECTL -n "$NAMESPACE" rollout status deployment/dnsadmin --timeout=300s || warn "dnsadmin не стал ready за отведённое время"
+$KUBECTL -n "$NAMESPACE" rollout status daemonset/dns-agent --timeout=300s || warn "dns-agent не стал ready за отведённое время"
 
 # ── 6. DNS01 ───────────────────────────────────────────────────────────────────
 if [[ "${DNS01:-no}" == "yes" ]]; then

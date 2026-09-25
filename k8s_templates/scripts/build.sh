@@ -63,6 +63,9 @@ export DEFAULT_ZONE
 export ADMIN_USERNAME ADMIN_PASSWORD JWT_SECRET
 export REGISTRY="${REGISTRY:-registry.summer-site.ru}"
 export DNSADMIN_IMAGE="${DNSADMIN_IMAGE:-$REGISTRY/$REGISTRY_IMAGE}"
+export AGENT_IMAGE="${AGENT_IMAGE:-$REGISTRY/dns-agent:latest}"
+export AGENT_API_KEY="${AGENT_API_KEY:-dns-agent-key}"
+export AGENT_SECRET_NAME="${AGENT_SECRET_NAME:-dns-agent-key}"
 
 # TLS-аннотации
 if [[ "${INGRESS_TLS:-no}" == "yes" ]]; then

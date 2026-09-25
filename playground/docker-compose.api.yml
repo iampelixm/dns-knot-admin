@@ -1,0 +1,18 @@
+services:
+  api:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    container_name: dnsadmin-api
+    environment:
+      DNSADMIN_DB_PATH: /data/dnsadmin.db
+      JWT_SECRET: dev-jwt-secret-for-local-testing
+      MASTER_ENCRYPTION_KEY: dGhpcyBpcyBhIDMyLWJ5dGUgbG9uZyBzZWNyZXQh
+      DNSADMIN_DNS_BACKEND: standalone
+    ports:
+      - "8080:8080"
+    volumes:
+      - dnsadmin-data:/data
+
+volumes:
+  dnsadmin-data:
