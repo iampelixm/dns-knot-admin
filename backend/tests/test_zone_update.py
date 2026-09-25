@@ -3,10 +3,28 @@
 from __future__ import annotations
 
 import datetime
+import os
+import tempfile
+from base64 import urlsafe_b64encode
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
+
+from app import db as _db
+
+_ENCRYPTION_KEY = urlsafe_b64encode(b"0123456789abcdef0123456789abcdef").decode()
+
+
+@pytest.fixture(autouse=True)
+def _patch_db(monkeypatch: pytest.MonkeyPatch) -> None:
+    tmp = tempfile.mktemp(suffix=".db")
+    monkeypatch.setattr(_db, "DB_PATH", tmp)
+    monkeypatch.setenv("MASTER_ENCRYPTION_KEY", _ENCRYPTION_KEY)
+    _db.migrate()
+    yield
+    if os.path.exists(tmp):
+        os.unlink(tmp)
 
 ZONE_NAME = "example.com"
 

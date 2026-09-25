@@ -29,6 +29,9 @@ spec:
           ports:
             - name: http
               containerPort: 8080
+          volumeMounts:
+            - name: data
+              mountPath: /data
           env:
             - name: NAMESPACE
               value: dns-knot
@@ -61,6 +64,11 @@ spec:
                 secretKeyRef:
                   name: dnsadmin-auth
                   key: ADMIN_PASSWORD
+            - name: MASTER_ENCRYPTION_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: dnsadmin-auth
+                  key: MASTER_ENCRYPTION_KEY
           readinessProbe:
             httpGet:
               path: /health
@@ -80,3 +88,8 @@ spec:
             limits:
               cpu: 400m
               memory: 512Mi
+          # Подключение PVC для хранения SQLite
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: dnsadmin-data

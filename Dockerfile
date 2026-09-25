@@ -19,7 +19,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    STATIC_DIR=/app/static
+    STATIC_DIR=/app/static \
+    DNSADMIN_DB_PATH=/data/dnsadmin.db
+
+RUN mkdir -p /data
 
 COPY backend/requirements.txt .
 RUN pip3 install --break-system-packages --no-cache-dir -r requirements.txt
