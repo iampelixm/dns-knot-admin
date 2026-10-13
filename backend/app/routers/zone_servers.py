@@ -51,6 +51,12 @@ class AssignServerBody(BaseModel):
     settings: str = "{}"
 
 
+class ReplaceServersBody(BaseModel):
+    """Полная замена набора серверов зоны: список (server_id, role). Ровно один primary."""
+    servers: list[AssignServerBody]
+    resync: bool = True
+
+
 @router.get("/{zone_name}/servers")
 def list_zone_servers(
     zone_name: str,
@@ -62,6 +68,62 @@ def list_zone_servers(
         raise HTTPException(status_code=404, detail="Зона не найдена")
     servers = _db.list_zone_servers(zone_name=zone_name)
     return {"servers": servers}
+
+
+@router.put("/{zone_name}/servers")
+def replace_zone_servers(
+    zone_name: str,
+    body: ReplaceServersBody,
+    _: Dict[str, Any] = Depends(_get_current_user),
+) -> Dict[str, Any]:
+    """Полностью переопределить роли серверов зоны (primary/secondary).
+
+    Ровно один сервер должен быть primary. Все серверы должны существовать.
+    Опционально пересобирает knot.conf primary + secondary."""
+    zone = _db.get_zone(zone_name)
+    if not zone:
+        raise HTTPException(status_code=404, detail="Зона не найдена")
+
+    roles = [s.role for s in body.servers]
+    for r in roles:
+        if r not in ("primary", "secondary"):
+            raise HTTPException(status_code=400, detail=f"Недопустимая роль '{r}' (ожидается primary/secondary)")
+    if roles.count("primary") > 1:
+        raise HTTPException(status_code=400, detail="Может быть только один primary для зоны")
+
+    for item in body.servers:
+        server = _db.get_dns_server(item.server_id)
+        if not server:
+            raise HTTPException(status_code=404, detail=f"Сервер '{item.server_id}' не найден")
+
+    # снять все текущие связи зоны
+    for existing in _db.list_zone_servers(zone_name=zone_name):
+        _db.remove_zone_from_server(zone_name, existing["server_id"])
+
+    created = []
+    for item in body.servers:
+        row = _db.assign_zone_to_server(
+            zone_name=zone_name,
+            server_id=item.server_id,
+            role=item.role,
+            tsig_key_id=item.tsig_key_id,
+            serial=item.serial,
+            settings=item.settings,
+        )
+        if row:
+            created.append(row)
+
+    result: Dict[str, Any] = {"servers": created, "status": "replaced"}
+
+    if body.resync:
+        try:
+            from app.main import get_clients, _reconcile_zone_roles
+            core, apps = get_clients()
+            result["sync"] = _reconcile_zone_roles(zone_name, core, apps)
+        except Exception as e:  # noqa: BLE001
+            result["sync_error"] = str(e)
+
+    return result
 
 
 @router.post("/{zone_name}/servers", status_code=201)

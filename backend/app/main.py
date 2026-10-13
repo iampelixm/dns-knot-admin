@@ -32,7 +32,8 @@ from app.axfr_secret import axfr_diag_public_dict, generate_tsig_yaml_fragment, 
 from app.dns_probe import knot_probe, query_soa_serial
 from app.dnssec_ds import fetch_ds_records_for_zone, zone_is_ru_family
 from app.knot_conf import list_zone_dnssec_flags, set_zone_dnssec_signing, zone_declared_in_knot_conf
-from app.knot_conf import ensure_zone_in_knot_conf_secondary
+from app.knot_conf import ensure_zone_in_knot_conf, ensure_zone_in_knot_conf_secondary, ensure_symmetric_remotes
+from app.knot_conf import list_zone_field, remove_zone_from_knot_conf
 from app.knot_editor_model import KnotEditorModel, apply_editor_model, extract_editor_model
 from app.knot_validate import knot_conf_needs_axfr, run_knotc_conf_check
 from app.knot_yaml import load_schema, parse_knot_conf, serialize_knot_conf
@@ -363,29 +364,6 @@ def validate_zone_name(name: str) -> None:
             raise HTTPException(status_code=400, detail="Некорректное имя зоны")
 
 
-def ensure_zone_in_knot_conf(knot_conf: str, zone_name: str) -> str:
-    if re.search(rf"(?m)^\s*-\s*domain:\s*{re.escape(zone_name)}\s*$", knot_conf):
-        return knot_conf
-    block = (
-        f"  - domain: {zone_name}\n"
-        f"    file: /zones/{zone_name}.zone\n"
-        f"    acl: [axfr-allowed]\n"
-        f"    dnssec-signing: off\n"
-    )
-    return knot_conf.rstrip() + "\n\n" + block + "\n"
-
-
-def remove_zone_from_knot_conf(knot_conf: str, zone_name: str) -> str:
-    """Удалить блок зоны из knot.conf."""
-    pattern = (
-        rf"(?m)^\s*-\s*domain:\s*{re.escape(zone_name)}\s*\n"
-        rf"(?:^\s+(?!- )\S.*\n?)*"
-    )
-    result = re.sub(pattern, "", knot_conf)
-    result = re.sub(r"\n{3,}", "\n\n", result)
-    return result.strip() + "\n"
-
-
 def _issue_token(username: str) -> str:
     if not JWT_SECRET:
         raise HTTPException(
@@ -525,6 +503,8 @@ async def startup():
     if _settings.dns_backend == "knot_k8s":
         try:
             core, _ = get_clients()
+            from app import topology as _topo
+            _topo.ensure_seeded(core)
             cm_data = _read_knot_conf_map(core)
             zone_files = {k[:-5]: v for k, v in cm_data.items() if k.endswith(".zone")}
             knot_conf = cm_data.get("knot.conf")
@@ -907,41 +887,50 @@ def get_instances(_: Dict[str, Any] = Depends(get_current_user)) -> Dict[str, An
 @app.get("/api/zones/sync-status")
 def get_zones_sync_status(_: Dict[str, Any] = Depends(get_current_user)) -> Dict[str, Any]:
     """
-    Сверка SOA serial по всем зонам на всех инстансах.
+    Сверка SOA serial по всем зонам по пер-доменным ролям (server_id → роль).
 
-    Требует KNOT_INSTANCES. Возвращает матрицу зона × сервер с serial и статусом синхронизации.
+    Использует dns_servers + zone_servers (fallback на KNOT_INSTANCES).
     ```json
     {
       "instances": [...],
       "zones": [{
         "zone": "summer-site.ru",
-        "servers": [{"id": "ns", "serial": 2026091701, "synced": true, ...}],
-        "primary_serial": 2026091701
+        "servers": [{"id": "first", "role": "primary", "serial": ..., "synced": true, ...}],
+        "primary_serial": ...
       }]
     }
     ```
     """
-    if not KNOT_INSTANCES_LIST:
-        return {"instances": [], "zones": [], "warning": "KNOT_INSTANCES не настроен — мульти-инстанс отключён"}
+    from app import topology as _topo
 
     core, _ = get_clients()
     cm_data = _read_knot_conf_map(core)
     zone_names = sorted(k[:-5] for k in cm_data if k.endswith(".zone"))
 
+    if not zone_names:
+        return {"instances": _topo.global_instances(), "zones": [], "warning": "Нет зон в primary ConfigMap"}
+
+    # Матрица «какие серверы должны обслуживать зону» (пер-доменные роли)
     zones_result = []
     for zone in zone_names:
+        roles = _topo.get_zone_roles(zone)
+        primary_id = roles.get("primary")
+        secondary_ids = roles.get("secondaries", [])
+        server_ids = [sid for sid in [primary_id] + secondary_ids if sid]
+
         servers: List[Dict[str, Any]] = []
         primary_serial: int | None = None
-
-        for inst in KNOT_INSTANCES_LIST:
-            ip = inst.get("ip", "")
-            role = inst.get("role", "unknown")
+        for sid in server_ids:
+            ip = _topo.server_ip(sid)
+            if not ip:
+                continue
+            role = "primary" if sid == primary_id else "secondary"
             ok, serial, msg = query_soa_serial(ip, zone)
             if role == "primary" and serial is not None:
                 primary_serial = serial
             servers.append({
-                "id": inst.get("id"),
-                "label": inst.get("label", inst.get("id")),
+                "id": sid,
+                "label": sid,
                 "ip": ip,
                 "role": role,
                 "ok": ok,
@@ -957,7 +946,7 @@ def get_zones_sync_status(_: Dict[str, Any] = Depends(get_current_user)) -> Dict
 
         zones_result.append({"zone": zone, "servers": servers, "primary_serial": primary_serial})
 
-    return {"instances": KNOT_INSTANCES_LIST, "zones": zones_result}
+    return {"instances": _topo.global_instances(), "zones": zones_result}
 
 
 @app.post("/api/zones/{zone_name}/validate")
@@ -1031,7 +1020,7 @@ def save_zone_form(
     zone_name: str,
     body: ZoneEditorFormModel,
     _: Dict[str, Any] = Depends(get_current_user),
-) -> Dict[str, str]:
+) -> Dict[str, Any]:
     """Сохранить зону из формы редактора (serial bump + рестарт Knot).
 
     Для обычных зон: сохраняет records в zone_records и пропагирует изменения на follower.
@@ -1463,15 +1452,22 @@ def get_zone_dnssec_ds(
     }
 
 
-def _sync_zone_to_secondaries(zone_name: str, core: client.CoreV1Api, apps: client.AppsV1Api) -> list[str]:
-    """Добавить зону в knot.conf всех secondary инстансов, если её там нет.
-    Возвращает список ID инстансов, которые были перезапущены."""
+def _peer_tsig_key() -> str:
+    return os.environ.get("KNOT_PEER_TSIG_KEY", "secondary-01")
+
+
+def _sync_zone_to_peers(zone_name: str, core: client.CoreV1Api, apps: client.AppsV1Api) -> list[str]:
+    """Добавить/обновить зону в knot.conf всех in-cluster secondary по пер-доменным ролям.
+    Возвращает список ID серверов, которые были перезапущены."""
+    from app import topology as _topo
+
     restarted: list[str] = []
-    for inst in KNOT_INSTANCES_LIST:
-        if inst.get("role") != "secondary":
-            continue
-        cm_name = inst.get("configmap", "")
-        dep_name = inst.get("deployment", "")
+    roles = _topo.get_zone_roles(zone_name)
+    primary_id = roles.get("primary")
+
+    for target in _topo.zone_secondary_targets(zone_name):
+        cm_name = target.get("configmap", "")
+        dep_name = target.get("deployment", "")
         if not cm_name or not dep_name:
             continue
         try:
@@ -1481,27 +1477,37 @@ def _sync_zone_to_secondaries(zone_name: str, core: client.CoreV1Api, apps: clie
             sec_conf = sec_cm.data.get("knot.conf", "")
             if not sec_conf:
                 continue
-            new_conf = ensure_zone_in_knot_conf_secondary(sec_conf, zone_name)
+            # remote на primary + acl для NOTIFY от primary
+            if primary_id:
+                p_ip = _topo.server_ip(primary_id)
+                if p_ip:
+                    sec_conf = ensure_symmetric_remotes(sec_conf, [(primary_id, p_ip)], key_id=_peer_tsig_key())
+            new_conf = ensure_zone_in_knot_conf_secondary(
+                sec_conf,
+                zone_name,
+                master=f"peer-{primary_id}" if primary_id else "primary-remote",
+                acl=[f"peer-{primary_id}-notify"] if primary_id else "notify-allowed",
+            )
             if new_conf == sec_conf:
                 continue
             sec_cm.data["knot.conf"] = new_conf
             core.patch_namespaced_config_map(cm_name, NAMESPACE, sec_cm)
             _trigger_knot_restart(apps, dep_name)
-            restarted.append(inst.get("id", ""))
+            restarted.append(target.get("server_id", cm_name))
         except Exception:  # noqa: BLE001
-            logger.warning("Не удалось синхронизировать зону %s на инстанс %s", zone_name, inst.get("id"))
+            logger.warning("Не удалось синхронизировать зону %s на сервер %s", zone_name, target.get("server_id", cm_name))
     return restarted
 
 
-def _remove_zone_from_secondaries(zone_name: str, core: client.CoreV1Api, apps: client.AppsV1Api) -> list[str]:
-    """Удалить зону из knot.conf всех secondary инстансов.
-    Возвращает список ID инстансов, которые были перезапущены."""
+def _remove_zone_from_peers(zone_name: str, core: client.CoreV1Api, apps: client.AppsV1Api) -> list[str]:
+    """Удалить зону из knot.conf всех in-cluster secondary по пер-доменным ролям.
+    Возвращает список ID серверов, которые были перезапущены."""
+    from app import topology as _topo
+
     restarted: list[str] = []
-    for inst in KNOT_INSTANCES_LIST:
-        if inst.get("role") != "secondary":
-            continue
-        cm_name = inst.get("configmap", "")
-        dep_name = inst.get("deployment", "")
+    for target in _topo.zone_secondary_targets(zone_name):
+        cm_name = target.get("configmap", "")
+        dep_name = target.get("deployment", "")
         if not cm_name or not dep_name:
             continue
         try:
@@ -1517,10 +1523,121 @@ def _remove_zone_from_secondaries(zone_name: str, core: client.CoreV1Api, apps: 
             sec_cm.data["knot.conf"] = new_conf
             core.patch_namespaced_config_map(cm_name, NAMESPACE, sec_cm)
             _trigger_knot_restart(apps, dep_name)
-            restarted.append(inst.get("id", ""))
+            restarted.append(target.get("server_id", cm_name))
         except Exception:  # noqa: BLE001
-            logger.warning("Не удалось удалить зону %s с инстанса %s", zone_name, inst.get("id"))
+            logger.warning("Не удалось удалить зону %s с сервера %s", zone_name, target.get("server_id", cm_name))
     return restarted
+
+
+def _reconcile_zone_roles(
+    zone_name: str,
+    core: client.CoreV1Api,
+    apps: client.AppsV1Api,
+) -> Dict[str, Any]:
+    """Привести knot.conf всех in-cluster серверов в соответствие с ролями зоны.
+
+    - primary: peer-remotes + notify (не трогаем если зона вообще не в его ConfigMap)
+    - secondary: block зоны с master=peer-<primary>
+    - прочие in-cluster серверы: блок зоны убирается.
+
+    Возвращает {updated: [server_id, ...], restarted_at}.
+    """
+    from app import topology as _topo
+
+    roles = _topo.get_zone_roles(zone_name)
+    primary_id = roles.get("primary")
+    secondary_ids = set(roles.get("secondaries", []))
+
+    updated: list[str] = []
+    restarted = ""
+    zone_key = f"{zone_name}.zone"
+
+    # Конфигурация primary
+    p_cm = None
+    if primary_id:
+        p_target = _topo.zone_primary_target(zone_name)
+        if p_target:
+            p_cm = p_target["configmap"]
+
+    # Обновляем knot.conf на всех in-cluster серверах
+    for target in _topo.all_in_cluster_targets():
+        sid = target["server_id"]
+        cm_name = target["configmap"]
+        dep_name = target["deployment"]
+        try:
+            sec_cm = core.read_namespaced_config_map(cm_name, NAMESPACE)
+        except Exception:  # noqa: BLE001
+            logger.warning("reconcile: не могу прочитать ConfigMap %s", cm_name)
+            continue
+        if sec_cm.data is None:
+            sec_cm.data = {}
+
+        # Если зоны нет в этом ConfigMap — пропускаем (оставляем как есть, тут нет конфигурации зоны)
+        has_zone = zone_key in sec_cm.data
+
+        knot_conf = sec_cm.data.get("knot.conf", "")
+        new_conf = knot_conf
+        if sid == primary_id:
+            # primary: если зона есть в его ConfigMap — peer-remotes + notify
+            if has_zone and knot_conf:
+                new_conf = _ensure_primary_notify_and_peers(knot_conf, zone_name)
+        elif sid in secondary_ids:
+            # secondary: remote на primary + блок зоны
+            if primary_id:
+                p_ip = _topo.server_ip(primary_id)
+                if p_ip:
+                    new_conf = ensure_symmetric_remotes(
+                        new_conf, [(primary_id, p_ip)], key_id=_peer_tsig_key(),
+                    )
+            if has_zone or knot_conf:
+                new_conf = ensure_zone_in_knot_conf_secondary(
+                    new_conf,
+                    zone_name,
+                    master=f"peer-{primary_id}" if primary_id else "primary-remote",
+                    acl=[f"peer-{primary_id}-notify"] if primary_id else "notify-allowed",
+                )
+        else:
+            # не участвует в зоне: убрать блок из knot.conf
+            if knot_conf and zone_declared_in_knot_conf(knot_conf, zone_name):
+                new_conf = remove_zone_from_knot_conf(knot_conf, zone_name)
+
+        if new_conf != knot_conf:
+            sec_cm.data["knot.conf"] = new_conf
+            try:
+                core.patch_namespaced_config_map(cm_name, NAMESPACE, sec_cm)
+                updated.append(sid)
+                ts = _trigger_knot_restart(apps, dep_name) if dep_name else ""
+                if ts:
+                    restarted = ts
+            except Exception:  # noqa: BLE001
+                logger.warning("reconcile: не удалось обновить %s", cm_name, exc_info=True)
+
+    return {"updated": updated, "restarted_at": restarted}
+
+
+def _ensure_primary_notify_and_peers(
+    knot_conf: str,
+    zone_name: str,
+) -> str:
+    """Проставить в knot.conf primary: peer-remotes под каждую in-cluster secondary зоны
+    и notify-список блока зоны в виде `peer-<secondary_id>`."""
+    from app import topology as _topo
+
+    roles = _topo.get_zone_roles(zone_name)
+    secondaries = _topo.zone_secondary_targets(zone_name)
+    notify_ids: list[str] = []
+    for t in secondaries:
+        sid = t.get("server_id")
+        if not sid:
+            continue
+        ip = _topo.server_ip(sid)
+        if ip:
+            knot_conf = ensure_symmetric_remotes(knot_conf, [(sid, ip)], key_id=_peer_tsig_key())
+        notify_ids.append(f"peer-{sid}")
+    if not notify_ids and roles.get("primary"):
+        # fallback: если вторичек нет в per-zone, сохранить старый master-remote
+        notify_ids = ["master-remote"]
+    return ensure_zone_in_knot_conf(knot_conf, zone_name, notify=notify_ids)
 
 
 def _apply_zone_update(
@@ -1552,12 +1669,12 @@ def _apply_zone_update(
 
     cm.data[key] = content
     if cm.data.get("knot.conf"):
-        cm.data["knot.conf"] = ensure_zone_in_knot_conf(cm.data["knot.conf"], zone_name)
+        cm.data["knot.conf"] = _ensure_primary_notify_and_peers(cm.data["knot.conf"], zone_name)
     core.patch_namespaced_config_map(CONFIGMAP_NAME, NAMESPACE, cm)
 
     ts = _trigger_knot_restart(apps)
 
-    synced = _sync_zone_to_secondaries(zone_name, core, apps)
+    synced = _sync_zone_to_peers(zone_name, core, apps)
 
     notify_sent = _knotc_zone_notify(zone_name)
 
@@ -1601,7 +1718,7 @@ def _delete_zone_from_knot(
     core.patch_namespaced_config_map(CONFIGMAP_NAME, NAMESPACE, cm)
     ts = _trigger_knot_restart(apps)
 
-    removed = _remove_zone_from_secondaries(zone_name, core, apps)
+    removed = _remove_zone_from_peers(zone_name, core, apps)
 
     return {
         "status": "ok",
@@ -1694,10 +1811,10 @@ def sync_zone(
     zone_name: str,
     _: Dict[str, Any] = Depends(get_current_user),
 ) -> ZoneSyncResult:
-    """Принудительная синхронизация зоны на все secondary инстансы.
+    """Принудительная синхронизация зоны на все in-cluster secondary по пер-доменным ролям.
 
-    Добавляет блок зоны в knot.conf каждого secondary ConfigMap,
-    если её там нет, и перезапускает соответствующие Knot-деплойменты.
+    Обновляет блок зоны в knot.conf каждого вторичного ConfigMap,
+    если его там нет, и перезапускает соответствующие Knot-деплойменты.
     """
     validate_zone_name(zone_name)
     core, apps = get_clients()
@@ -1706,21 +1823,19 @@ def sync_zone(
     if cm.data is None or key not in cm.data:
         raise HTTPException(status_code=404, detail=f"Зона {zone_name} не найдена в primary ConfigMap")
 
-    if not KNOT_INSTANCES_LIST:
-        return ZoneSyncResult(zone=zone_name, synced_secondaries=[], skipped=[])
+    from app import topology as _topo
 
     synced: list[str] = []
     skipped: list[str] = []
-    for inst in KNOT_INSTANCES_LIST:
-        role = inst.get("role", "")
-        if role != "secondary":
-            skipped.append(f"{inst.get('id', '')}({role})")
-            continue
+    roles = _topo.get_zone_roles(zone_name)
+    primary_id = roles.get("primary")
 
-        cm_name = inst.get("configmap", "")
-        dep_name = inst.get("deployment", "")
+    for target in _topo.zone_secondary_targets(zone_name):
+        cm_name = target.get("configmap", "")
+        dep_name = target.get("deployment", "")
+        sid = target.get("server_id", cm_name)
         if not cm_name or not dep_name:
-            skipped.append(f"{inst.get('id', '')}(no configmap)")
+            skipped.append(f"{sid}(no configmap/deployment)")
             continue
         try:
             sec_cm = core.read_namespaced_config_map(cm_name, NAMESPACE)
@@ -1728,18 +1843,23 @@ def sync_zone(
                 sec_cm.data = {}
             sec_conf = sec_cm.data.get("knot.conf", "")
             if not sec_conf:
-                skipped.append(f"{inst.get('id', '')}(no knot.conf)")
+                skipped.append(f"{sid}(no knot.conf)")
                 continue
-            new_conf = ensure_zone_in_knot_conf_secondary(sec_conf, zone_name)
+            new_conf = ensure_zone_in_knot_conf_secondary(
+                sec_conf,
+                zone_name,
+                master=f"peer-{primary_id}" if primary_id else "primary-remote",
+                acl=[f"peer-{primary_id}-notify"] if primary_id else "notify-allowed",
+            )
             if new_conf == sec_conf:
-                skipped.append(f"{inst.get('id', '')}(already present)")
+                skipped.append(f"{sid}(already present)")
                 continue
             sec_cm.data["knot.conf"] = new_conf
             core.patch_namespaced_config_map(cm_name, NAMESPACE, sec_cm)
             _trigger_knot_restart(apps, dep_name)
-            synced.append(inst.get("id", ""))
+            synced.append(sid)
         except Exception as e:  # noqa: BLE001
-            logger.warning("Sync zone %s to %s failed: %s", zone_name, inst.get("id"), e)
+            logger.warning("Sync zone %s to %s failed: %s", zone_name, sid, e)
     return ZoneSyncResult(zone=zone_name, synced_secondaries=synced, skipped=skipped)
 
 

@@ -264,7 +264,83 @@
           </el-tab-pane>
 
           <el-tab-pane label="Серверы" name="servers">
-            <el-card shadow="never">
+            <el-card shadow="never" class="roles-card">
+              <template #header>
+                <div style="display:flex;align-items:center;justify-content:space-between">
+                  <span>Роли для зоны</span>
+                  <span>
+                    <el-button size="small" :loading="rolesLoading" @click="loadZoneRoles">Обновить</el-button>
+                    <el-button
+                      size="small"
+                      type="primary"
+                      :loading="rolesSaving"
+                      :disabled="!rolesDirty || !selectedZone"
+                      @click="saveZoneRoles"
+                    >Сохранить роли</el-button>
+                  </span>
+                </div>
+              </template>
+              <el-alert
+                v-if="!selectedZone"
+                type="info"
+                :closable="false"
+                show-icon
+                title="Выберите зону в списке выше."
+                style="margin-bottom:12px"
+              />
+              <template v-else>
+                <el-table :data="sortedRoleServers" border size="small" :empty-text="roleEmptyText">
+                  <el-table-column label="Сервер" width="200">
+                    <template #default="{ row }">
+                      <div>{{ row.name }}</div>
+                      <div class="muted small-p" style="margin:0">{{ row.id }}</div>
+                    </template>
+                  </el-table-column>
+                  <el-table-column label="Адрес" width="170">
+                    <template #default="{ row }">
+                      <span class="mono-small">{{ row.address }}:{{ row.port }}</span>
+                    </template>
+                  </el-table-column>
+                  <el-table-column label="Тип / доставка" width="170">
+                    <template #default="{ row }">
+                      <el-tag size="small" effect="plain">{{ row.server_type }}</el-tag>
+                      <span class="muted" style="margin-left:6px">{{ row.delivery_method }}</span>
+                    </template>
+                  </el-table-column>
+                  <el-table-column label="Роль" min-width="220">
+                    <template #default="{ row }">
+                      <el-radio-group
+                        v-model="row.zone_role"
+                        @change="onRoleChange"
+                      >
+                        <el-radio-button label="primary">primary</el-radio-button>
+                        <el-radio-button label="secondary">secondary</el-radio-button>
+                        <el-radio-button label="none">нет</el-radio-button>
+                      </el-radio-group>
+                    </template>
+                  </el-table-column>
+                  <el-table-column label="Источник" width="120">
+                    <template #default="{ row }">
+                      <el-tag v-if="row.origin === 'db'" size="small" type="success" effect="plain">назначен</el-tag>
+                      <el-tag v-else size="small" type="info" effect="plain">fallback</el-tag>
+                    </template>
+                  </el-table-column>
+                </el-table>
+                <el-alert
+                  v-if="rolesHint"
+                  type="info"
+                  :closable="false"
+                  show-icon
+                  class="roles-hint"
+                  :title="rolesHint"
+                />
+                <p v-if="roleSourceNote" class="muted small-p" style="margin:8px 0 0">
+                  {{ roleSourceNote }}
+                </p>
+              </template>
+            </el-card>
+
+            <el-card shadow="never" style="margin-top:16px">
               <template #header>
                 <div style="display:flex;align-items:center;justify-content:space-between">
                   <span>Состояние зоны на серверах</span>
@@ -425,11 +501,15 @@ import {
   emptyZoneForm,
   unfollowZone,
   fetchFollowerInfo,
+  fetchDnsServers,
+  replaceZoneServers,
   type DnsHealthResponse,
+  type DnsServer,
   type DnssecDsResponse,
   type ZoneFormModel,
   type ZoneFormWithSource,
   type ZoneSummary,
+  type ZoneServerReplaceItem,
   type ZoneSyncEntry,
   type ZonesSyncStatusResponse,
   type ZonesResponse,
@@ -480,6 +560,118 @@ const syncUpdatedAt = ref("");
 const currentZoneSync = computed<ZoneSyncEntry | null>(
   () => syncZones.value.find((z) => z.zone === selectedZone.value) ?? null,
 );
+
+type RoleServerRow = DnsServer & {
+  zone_role: "primary" | "secondary" | "none";
+  origin: "db" | "fallback";
+};
+
+const rolesLoading = ref(false);
+const rolesSaving = ref(false);
+const roleServers = ref<RoleServerRow[]>([]);
+const roleSourceNote = ref("");
+const rolesHint = ref("");
+const rolesDirty = ref(false);
+const roleEmptyText = ref("");
+const sortedRoleServers = computed<RoleServerRow[]>(() => {
+  const rank: Record<RoleServerRow["zone_role"], number> = { primary: 0, secondary: 1, none: 2 };
+  return [...roleServers.value].sort(
+    (a, b) => rank[a.zone_role] - rank[b.zone_role],
+  );
+});
+
+function applyRolesToServers(servers: DnsServer[], assigned: Map<string, string>) {
+  roleServers.value = servers.map((s) => ({
+    ...s,
+    zone_role: (assigned.get(s.id) as "primary" | "secondary") ?? "none",
+    origin: assigned.has(s.id) ? "db" : "fallback",
+  }));
+  // если роли для зоны ещё не заданы — по умолчанию первая строка = primary
+  if (!roleServers.value.some((s) => s.zone_role !== "none")) {
+    const first = roleServers.value[0];
+    if (first) first.zone_role = "primary";
+  }
+}
+
+async function loadZoneRoles() {
+  if (!selectedZone.value) return;
+  rolesLoading.value = true;
+  rolesHint.value = "";
+  roleEmptyText.value = "";
+  roleSourceNote.value = "Загрузка…";
+  try {
+    const [ds, zs] = await Promise.all([
+      fetchDnsServers(),
+      api.get<{ servers: Array<{ server_id: string; role: string }> }>(
+        `/api/zones/${encodeURIComponent(selectedZone.value)}/servers`,
+      ),
+    ]);
+    if (!ds.servers.length) {
+      roleEmptyText.value = "Нет DNS-серверов. Добавьте сервер на странице «DNS-серверы».";
+      roleServers.value = [];
+      roleSourceNote.value = "";
+      return;
+    }
+    const assigned = new Map<string, string>();
+    for (const s of zs.data.servers) assigned.set(s.server_id, s.role);
+    applyRolesToServers(ds.servers, assigned);
+    const hasDbRoles = assigned.size > 0;
+    const roles = roleServers.value.filter((s) => s.zone_role !== "none");
+    if (!hasDbRoles) {
+      const p = roleServers.value.find((s) => s.zone_role === "primary");
+      rolesHint.value = "Для зоны не назначены роли — используется глобальная топология (fallback). По умолчанию primary — первый сервер в списке. Сохраните, чтобы закрепить роли.";
+      roleSourceNote.value = p ? `Primary: ${p.name} (${p.id}).` : "";
+    } else {
+      const p = roles.find((s) => s.zone_role === "primary");
+      roleSourceNote.value = p
+        ? `Primary: ${p.name} (${p.id}). In-cluster серверы без роли «нет» будут убраны из knot.conf этой зоны.`
+        : "Роли заданы, но primary не выбран — Knot может работать некорректно. Укажите primary.";
+    }
+    rolesDirty.value = false;
+  } catch (e) {
+    ElMessage.error(messageFromAxios(e, "Не удалось загрузить роли серверов"));
+  } finally {
+    rolesLoading.value = false;
+  }
+}
+
+function onRoleChange() {
+  rolesDirty.value = true;
+}
+
+function zoneRolePayload(): ZoneServerReplaceItem[] {
+  return roleServers.value
+    .filter((s) => s.zone_role === "primary" || s.zone_role === "secondary")
+    .map((s) => ({ server_id: s.id, role: s.zone_role as "primary" | "secondary" }));
+}
+
+async function saveZoneRoles() {
+  if (!selectedZone.value) return;
+  const chosen = zoneRolePayload();
+  if (chosen.filter((s) => s.role === "primary").length > 1) {
+    ElMessage.error("May be only one primary. Не более одного primary.");
+    return;
+  }
+  rolesSaving.value = true;
+  try {
+    const resp = await replaceZoneServers(selectedZone.value, chosen);
+    rolesDirty.value = false;
+    ElMessage.success(
+      chosen.length
+        ? `Роли сохранены (${chosen.length} серверов)`
+        : "Роли сброшены — зона вернётся к глобальной топологии",
+    );
+    if (resp.sync_error) {
+      ElMessage.warning(`Серверы сохранены, но ресинк knot.conf не удался: ${resp.sync_error}`);
+    }
+    await loadZoneRoles();
+    fetchSyncStatus();
+  } catch (e) {
+    ElMessage.error(messageFromAxios(e, "Не удалось сохранить роли"));
+  } finally {
+    rolesSaving.value = false;
+  }
+}
 
 const dsLoading = ref(false);
 const dsDialogVisible = ref(false);
@@ -804,6 +996,7 @@ async function onZoneChange() {
   await router.replace({ name: "zone-editor", params: { zone: selectedZone.value } });
   syncDnssecFromServer();
   await loadZone();
+  if (activeTab.value === "servers") loadZoneRoles();
 }
 
 async function syncFormFromText(showToast = true) {
@@ -963,6 +1156,16 @@ watch(activeTab, (tab) => {
   if (tab === "servers" && !syncZones.value.length && !syncWarning.value) {
     fetchSyncStatus();
   }
+  if (tab === "servers") {
+    loadZoneRoles();
+  }
+});
+
+watch(selectedZone, () => {
+  collapsedGroups.value = new Set();
+  rolesDirty.value = false;
+  rolesHint.value = "";
+  roleSourceNote.value = "";
 });
 
 onMounted(async () => {
@@ -1103,6 +1306,12 @@ onUnmounted(() => {
 }
 .mb12 {
   margin-bottom: 12px;
+}
+.roles-card {
+  margin-bottom: 0;
+}
+.roles-hint {
+  margin-top: 12px;
 }
 .records-wrapper {
   width: 100%;

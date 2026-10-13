@@ -502,6 +502,33 @@ export async function removeZoneFromServer(
   await api.delete(`/api/zones/${encodeURIComponent(zoneName)}/servers/${encodeURIComponent(serverId)}`);
 }
 
+/** Массовая замена набора серверов зоны (ровно один primary). */
+export type ZoneServerReplaceItem = {
+  server_id: string;
+  role: "primary" | "secondary";
+};
+
+export type ZoneServerReplaceResponse = {
+  servers: ZoneServer[];
+  status: string;
+  sync?: {
+    updated: string[];
+    restarted_at: string;
+  };
+  sync_error?: string;
+};
+
+export async function replaceZoneServers(
+  zoneName: string,
+  servers: ZoneServerReplaceItem[],
+): Promise<ZoneServerReplaceResponse> {
+  const { data } = await api.put<ZoneServerReplaceResponse>(
+    `/api/zones/${encodeURIComponent(zoneName)}/servers`,
+    { servers, resync: true },
+  );
+  return data;
+}
+
 export async function deleteZone(zoneName: string): Promise<void> {
   await api.delete(`/api/zones/${encodeURIComponent(zoneName)}`);
 }
